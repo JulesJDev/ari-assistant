@@ -897,13 +897,53 @@ class AuthManager {
     async register(pin) {
         const hash = await Utils.hash256(pin);
         if (this.users[hash]) throw new Error('PIN déjà utilisé');
-        this.users[hash] { created: Date.now() };
+        
+        // Call backend to create user + session
+        const resp = await fetch('/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                pin_hash: hash,
+                device_id: this.deviceId
+            })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Échec inscription');
+        }
+        const data = await resp.json();
+        
+        // Save locally
+        this.users[hash] = { created: Date.now(), server_user_id: data.user_id };
         Utils.saveToLocal('ari_users', this.users);
+        
+        // Save session (server-issued)
+        this.session = { 
+            session_id: data.session_id,
+            user_id: data.user_id,
+            deviceId: data.device_id 
+        };
+        Utils.saveToLocal('ari_session', this.session);
+        
+        return true;
     }
     
     async login(pin) {
         const hash = await Utils.hash256(pin);
         if (!this.users[hash]) throw new Error('PIN incorrect');
+        
+        // Call backend to login + get session
+        const resp = await fetch('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin_hash: hash })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Échec connexion');
+        }
+        const data = await resp.json();
+        
         const userKey = hash;
         
         // Check trusted device
@@ -1026,7 +1066,21 @@ class WsManager {
             this.ws.send(JSON.stringify(data));
         }
     }
-    
+
+    sendToLLM(text) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket not open');
+            return;
+        }
+        this.send({
+            type: 'user_text',
+            data: {
+                text: text,
+                profile: 'default'
+                // user_id taken from session on server side
+            }
+        });
+    }    
     updateStatus(status) {
         this.onStatusChange && this.onStatusChange(status);
     }
@@ -1512,6 +1566,11 @@ class AriApp {
     constructor() {
         // Configuration
         this.wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+        // Append session_id if available
+        const sess = Utils.loadFromLocal('ari_session');
+        if (sess && sess.session_id) {
+            this.wsUrl += '?session_id=' + encodeURIComponent(sess.session_id);
+        }
         this.PIN_HASH = null;
         
         // Managers

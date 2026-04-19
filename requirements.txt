@@ -22,7 +22,7 @@ edge-tts==6.1.9
 # Note: whisper nécessite torch, installer via pip install openai-whisper
 
 # Recherche web
-duckduckgo-search==6.1.13  # ddgs
+duckduckgo-search==6.1.12  # ddgs
 tavily-python==0.3.1
 
 # Gestion des formulaires & uploads

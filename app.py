@@ -74,6 +74,34 @@ class WSUserTextPayload(BaseModel):
     """Payload for user text message."""
     text: str
     profile: str = "default"
+    # user_id est optionnel (debug/override), sinon pris de la session WebSocket
+    user_id: Optional[str] = None
+
+
+
+# ============ AUTH MODELS ============
+
+class UserRegister(BaseModel):
+    """Payload for user registration."""
+    pin_hash: str = Field(..., min_length=64, max_length=64)  # SHA256 hex
+    device_id: Optional[str] = Field(None, description="Optional device identifier")
+
+class UserLogin(BaseModel):
+    """Payload for user login."""
+    pin_hash: str = Field(..., min_length=64, max_length=64)
+
+class UserSession(BaseModel):
+    """Active user session."""
+    user_id: str
+    device_id: str
+    created_at: datetime
+    last_seen: datetime
+
+class TrustedDevice(BaseModel):
+    """Trusted device record."""
+    device_id: str
+    user_id: str
+    added_at: datetime
 
 class WSAuth2FABegin(BaseModel):
     """Payload to initiate 2FA."""
@@ -609,6 +637,115 @@ app.add_middleware(
 # Static files
 app.mount("/assets", StaticFiles(directory=str(CONFIG.ASSETS_DIR)), name="assets")
 
+
+
+# ============ AUTH HTTP ROUTES ============
+
+@app.post("/auth/register")
+async def register_user(payload: UserRegister):
+    """Register a new user with PIN hash."""
+    pin_hash = payload.pin_hash
+    
+    if pin_hash in _users:
+        raise HTTPException(status_code=400, detail="PIN already registered")
+    
+    _users[pin_hash] = {
+        "created": datetime.utcnow(),
+        "last_login": None,
+        "device_ids": set()
+    }
+    
+    # Auto-login on same device
+    session_id = str(uuid4())
+    device_id = payload.device_id or str(uuid4())
+    _sessions[session_id] = UserSession(
+        user_id=pin_hash,
+        device_id=device_id,
+        created_at=datetime.utcnow(),
+        last_seen=datetime.utcnow()
+    )
+    _users[pin_hash]["device_ids"].add(device_id)
+    _trusted_devices[device_id] = pin_hash
+    
+    return {"session_id": session_id, "user_id": pin_hash, "device_id": device_id}
+
+
+@app.post("/auth/login")
+async def login_user(payload: UserLogin):
+    """Login with PIN hash."""
+    pin_hash = payload.pin_hash
+    
+    if pin_hash not in _users:
+        raise HTTPException(status_code=401, detail="Invalid PIN")
+    
+    user = _users[pin_hash]
+    user["last_login"] = datetime.utcnow()
+    
+    # Check trusted devices (auto-login)
+    device_id = str(uuid4())
+    session_id = str(uuid4())
+    
+    _sessions[session_id] = UserSession(
+        user_id=pin_hash,
+        device_id=device_id,
+        created_at=datetime.utcnow(),
+        last_seen=datetime.utcnow()
+    )
+    user["device_ids"].add(device_id)
+    _trusted_devices[device_id] = pin_hash
+    
+    return {"session_id": session_id, "user_id": pin_hash, "device_id": device_id}
+
+
+@app.post("/auth/logout")
+async def logout_user(session_id: str = Body(..., embed=True)):
+    """Logout and invalidate session."""
+    if session_id in _sessions:
+        del _sessions[session_id]
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+async def get_current_user(session_id: str):
+    """Get current user info from session."""
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    user = _users.get(session.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "user_id": session.user_id,
+        "device_id": session.device_id,
+        "created_at": user["created"],
+        "last_login": user["last_login"]
+    }
+
+
+@app.post("/auth/trusted-devices")
+async def list_trusted_devices(user_id: str = Body(..., embed=True)):
+    """List trusted devices for a user."""
+    devices = [
+        {"device_id": d, "user_id": uid}
+        for d, uid in _trusted_devices.items()
+        if uid == user_id
+    ]
+    return {"devices": devices}
+
+
+@app.delete("/auth/trusted-devices/{device_id}")
+async def remove_trusted_device(device_id: str):
+    """Revoke a trusted device."""
+    if device_id in _trusted_devices:
+        user_id = _trusted_devices[device_id]
+        del _trusted_devices[device_id]
+        if user_id in _users:
+            _users[user_id]["device_ids"].discard(device_id)
+        return {"ok": True}
+    raise HTTPException(status_code=404, detail="Device not found")
+
 @app.get("/")
 async def root():
     """Serve index.html with no-cache headers."""
@@ -767,6 +904,17 @@ async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket endpoint."""
     client_id = str(uuid4())
     await manager.connect(websocket, client_id)
+    # ============ WEBSOCKET AUTH (simple session check) ============
+    # Extract session ID from query params or first message
+    session_id = websocket.query_params.get("session_id")
+    if not session_id or session_id not in _sessions:
+        await websocket.close(code=4001, reason="Unauthorized: invalid session")
+        return
+    
+    session = _sessions[session_id]
+    session.last_seen = datetime.utcnow()
+    user_id = session.user_id
+
     
     # Start heartbeat task if not running
     if manager.heartbeat_task is None or manager.heartbeat_task.done():
@@ -848,7 +996,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 payload = WSUserTextPayload(**data.get("data", {}))
                 user_text = payload.text
                 profile = payload.profile
-                user_id = client_id  # Use connection ID as user ID
+                # user_id already set from session validation above
                 
                 # State: thinking
                 await websocket.send_json({"type": "state", "state": "thinking"})
