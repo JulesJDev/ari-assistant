@@ -1,289 +1,349 @@
-#!/usr/bin/env python3
-"""
-Ari - Local Voice AI Assistant Backend
-FastAPI async server with SSE streaming, WebSocket, memory management, and LLM integration.
-"""
-
-import asyncio
-import json
 import os
+import json
+import asyncio
 import secrets
-import time
-from collections import deque
-from contextlib import asynccontextmanager
+import base64
+import subprocess
+import re
+import io
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, AsyncGenerator
-from uuid import uuid4
+from typing import Optional, Literal, Dict, Any, List, AsyncGenerator
+from collections import defaultdict
 
 import httpx
-from edge_tts import Communicate
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Body
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ============================================
-# SECTION 1: CONFIG & ENV
-# ============================================
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
 class Config:
-    """Configuration from environment variables."""
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
-    OPENROUTER_FALLBACK_MODELS: List[str] = os.getenv(
-        "OPENROUTER_FALLBACK_MODELS",
-        "meta-llama/llama-3.2-3b-instruct:free,mistralai/mistral-7b-instruct:free"
-    ).split(",")
-    OPENROUTER_MAX_MODEL_TRIES: int = int(os.getenv("OPENROUTER_MAX_MODEL_TRIES", "6"))
-    
-    EDGE_VOICE: str = os.getenv("EDGE_VOICE", "fr-FR-DeniseNeural")
-    EDGE_RATE: str = os.getenv("EDGE_RATE", "+25%")
-    
-    AI_NAME: str = os.getenv("AI_NAME", "Ari")
-    TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
-    PIPER_BIN: str = os.getenv("PIPER_BIN", "")
-    PIPER_MODEL_PATH: str = os.getenv("PIPER_MODEL_PATH", "")
-    INTERNET_ENABLED_DEFAULT: bool = os.getenv("INTERNET_ENABLED_DEFAULT", "true").lower() == "true"
-    PORT: int = int(os.getenv("PORT", "8000"))
-    
-    BASE_DIR = Path(__file__).parent
-    MEMORY_DIR = BASE_DIR / "memory_profiles"
-    HISTORY_DIR = BASE_DIR / "history"
-    ASSETS_DIR = BASE_DIR / "assets"
-    UPLOAD_DIR = BASE_DIR / "uploads"
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
+    OPENROUTER_FALLBACK_MODELS = os.getenv("OPENROUTER_FALLBACK_MODELS", "meta-llama/llama-3.2-3b-instruct:free,mistralai/mistral-7b-instruct:free")
+    OPENROUTER_MAX_MODEL_TRIES = int(os.getenv("OPENROUTER_MAX_MODEL_TRIES", "6"))
+    EDGE_VOICE = os.getenv("EDGE_VOICE", "fr-FR-DeniseNeural")
+    EDGE_RATE = os.getenv("EDGE_RATE", "+25%")
+    EDGE_PITCH = os.getenv("EDGE_PITCH", "+0Hz")
+    EDGE_VOLUME = os.getenv("EDGE_VOLUME", "+0%")
+    EDGE_TTS_TIMEOUT = int(os.getenv("EDGE_TTS_TIMEOUT", "18"))
+    MEMORY_MAX_TURNS = int(os.getenv("MEMORY_MAX_TURNS", "80"))
+    MEMORY_PROMPT_TURNS = int(os.getenv("MEMORY_PROMPT_TURNS", "6"))
+    MEMORY_OPTIMIZE_INTERVAL_SEC = int(os.getenv("MEMORY_OPTIMIZE_INTERVAL_SEC", "14400"))
+    DEFAULT_USER_ID = os.getenv("DEFAULT_USER_ID", "default")
+    DEFAULT_PROFILE_ID = os.getenv("DEFAULT_PROFILE_ID", "default")
+    AI_NAME = os.getenv("AI_NAME", "Ari")
+    WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "auto")
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+    PIPER_BIN = os.getenv("PIPER_BIN", "")
+    PIPER_MODEL_PATH = os.getenv("PIPER_MODEL_PATH", "")
+    REASONING_BAIL_MAX_CHARS = int(os.getenv("REASONING_BAIL_MAX_CHARS", "8192"))
+    INTERNET_ENABLED_DEFAULT = os.getenv("INTERNET_ENABLED_DEFAULT", "true").lower() == "true"
+    PORT = int(os.getenv("PORT", "8000"))
+    HTTP_REFERER = os.getenv("HTTP_REFERER", "http://localhost:8000")
+    APP_TITLE = os.getenv("APP_TITLE", "Ari Assistant")
 
 CONFIG = Config()
 
-# ============================================
-# SECTION 2: PYDANTIC MODELS
-# ============================================
+# ============================================================================
+# ATOMIC WRITE HELPER
+# ============================================================================
 
-class WSConfigUpdate(BaseModel):
-    """Payload for config updates via WebSocket."""
-    internet_enabled: Optional[bool] = None
-    tts_voice: Optional[str] = None
-    tts_rate: Optional[str] = None
-    model: Optional[str] = None
-    fallback_models: Optional[List[str]] = None
+def atomic_write_json(path: Path, data: dict) -> None:
+    """Atomically write JSON data to disk using tmp + rename."""
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
-class WSUserTextPayload(BaseModel):
-    """Payload for user text message."""
+# ============================================================================
+# PYDANTIC MODELS
+# ============================================================================
+
+class WsMsgGetConfig(BaseModel):
+    type: Literal["get_config"]
+
+class WsMsgSetConfig(BaseModel):
+    type: Literal["set_config"]
+    user_id: str
+    profile_id: str
+    ai_name: str
+    model: str
+    system_prompt: str
+    edge_voice: str
+    edge_rate: str
+    edge_pitch: str
+    edge_volume: str
+    tts_engine: Literal["edge", "piper", "auto", "off"]
+    temperature: float
+    max_tokens: int
+    internet_enabled: bool
+    avatar_config: dict
+
+class WsMsgUserText(BaseModel):
+    type: Literal["user_text"]
     text: str
+    silent: bool = False
     profile: str = "default"
-    # user_id est optionnel (debug/override), sinon pris de la session WebSocket
     user_id: Optional[str] = None
 
+class WsAuth2FABegin(BaseModel):
+    type: Literal["auth_2fa_begin"]
+    user_id: str
 
+class WsAuth2FAVerify(BaseModel):
+    type: Literal["auth_2fa_verify"]
+    user_id: str
+    code: str
 
-# ============ AUTH MODELS ============
+class MemoryTurn(BaseModel):
+    ts: str
+    user: str
+    assistant: str
+
+class MemoryFile(BaseModel):
+    turns: list[MemoryTurn] = []
+    summary: str = ""
+
+class MemoryFastFile(BaseModel):
+    items: list[str] = []
+    meta: dict = {}
+
+class MemorySecondaryFile(BaseModel):
+    items: list[str] = []
+    meta: dict = {}
+
+class LlmUsageBucket(BaseModel):
+    requests: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    estimated_usd: float = 0.0
+
+class LlmUsageFile(BaseModel):
+    version: int = 1
+    chat: dict[str, LlmUsageBucket] = {"free": LlmUsageBucket(), "paid": LlmUsageBucket()}
 
 class LibraryItem(BaseModel):
-    """Library item model."""
     name: str
     path: str
-    type: str  # "model", "background", "animation"
+    type: str
 
 class AnimationCatalog(BaseModel):
-    """Animation catalog entry."""
     id: str
     name: str
     preview_url: Optional[str] = None
-    tags: List[str] = []
+    tags: list[str] = []
 
-class UsageStats(BaseModel):
-    """LLM usage statistics."""
-    tokens: int
-    cost_usd: float
-    model: str
-    timestamp: str
-
-# ============================================
-# SECTION 3: MÉMOIRE (MULTI-LAYER MEMORY)
-# ============================================
+# ============================================================================
+# MEMORY MANAGER
+# ============================================================================
 
 class MemoryManager:
-    """Manages three-layer memory: raw, fast (compressed), secondary (episodic)."""
-    
-    def __init__(self, base_dir: Path):
-        self.base_dir = base_dir
-        self.cache: Dict[str, Dict] = {}  # In-memory cache
-        self._ensure_dirs()
-    
-    def _ensure_dirs(self):
-        """Ensure memory directories exist."""
-        (self.base_dir / "profiles").mkdir(parents=True, exist_ok=True)
-        (self.base_dir / "profiles" / "default").mkdir(parents=True, exist_ok=True)
-    
+    def __init__(self, base_path: Path = Path("memory_profiles")):
+        self.base_path = base_path
+        self.base_path.mkdir(exist_ok=True)
+        self._memory_cache: dict[str, MemoryFile] = {}
+        self._fast_cache: dict[str, MemoryFastFile] = {}
+        self._secondary_cache: dict[str, MemorySecondaryFile] = {}
+
     def _profile_path(self, user_id: str, profile_id: str, layer: str) -> Path:
-        """Get path to memory file."""
-        base = self.base_dir / "profiles" / user_id / profile_id
-        return base / f"memory_{layer}.json"
-    
-    def _atomic_write(self, path: Path, data: Dict):
-        """Atomic write using temp file + rename."""
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        os.replace(tmp, path)
-    
-    async def load_memory(self, user_id: str, profile_id: str, layer: str) -> Dict:
-        """Load memory layer, using cache if available."""
-        cache_key = f"{user_id}:{profile_id}:{layer}"
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-        
+        return self.base_path / user_id / profile_id / f"memory_{layer}.json"
+
+    def load_memory(self, user_id: str, profile_id: str, layer: str) -> dict:
+        key = f"{user_id}/{profile_id}/{layer}"
+        cache = {
+            "raw": self._memory_cache,
+            "fast": self._fast_cache,
+            "secondary": self._secondary_cache
+        }.get(layer)
+
+        if cache is not None and key in cache:
+            return cache[key].dict()
+
         path = self._profile_path(user_id, profile_id, layer)
-        if path.exists():
+        if not path.exists():
+            return {"turns": [], "summary": ""} if layer == "raw" else {"items": [], "meta": {}}
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if layer == "raw":
+                obj = MemoryFile(**data)
+                self._memory_cache[key] = obj
+            elif layer == "fast":
+                obj = MemoryFastFile(**data)
+                self._fast_cache[key] = obj
+            elif layer == "secondary":
+                obj = MemorySecondaryFile(**data)
+                self._secondary_cache[key] = obj
+            return obj.dict()
+        except Exception as e:
+            print(f"Memory load error {path}: {e}")
+            return {"turns": [], "summary": ""} if layer == "raw" else {"items": [], "meta": {}}
+
+    def save_memory(self, user_id: str, profile_id: str, layer: str, data: dict) -> None:
+        key = f"{user_id}/{profile_id}/{layer}"
+        path = self._profile_path(user_id, profile_id, layer)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            if layer == "raw":
+                obj = MemoryFile(**data)
+                self._memory_cache[key] = obj
+            elif layer == "fast":
+                obj = MemoryFastFile(**data)
+                self._fast_cache[key] = obj
+            elif layer == "secondary":
+                obj = MemorySecondaryFile(**data)
+                self._secondary_cache[key] = obj
+
+            atomic_write_json(path, obj.dict())
+        except Exception as e:
+            print(f"Memory save error {path}: {e}")
+
+    def append_message(self, user_id: str, profile_id: str, role: str, content: str) -> None:
+        raw = self.load_memory(user_id, profile_id, "raw")
+        turn = MemoryTurn(
+            ts=datetime.utcnow().isoformat() + "Z",
+            user=role if role == "user" else "",
+            assistant=content if role == "assistant" else ""
+        )
+        if role == "user":
+            raw.setdefault("turns", []).append({"ts": turn.ts, "user": content, "assistant": ""})
+        else:
+            if raw["turns"]:
+                raw["turns"][-1]["assistant"] = content
+            else:
+                raw["turns"].append({"ts": turn.ts, "user": "", "assistant": content})
+
+        if len(raw["turns"]) > CONFIG.MEMORY_MAX_TURNS:
+            raw["turns"] = raw["turns"][-CONFIG.MEMORY_MAX_TURNS:]
+
+        self.save_memory(user_id, profile_id, "raw", raw)
+
+    def build_context(self, user_id: str, profile_id: str, max_tokens: int = 2000) -> List[Dict[str, str]]:
+        """Build LLM context from memory layers."""
+        config_path = self._profile_path(user_id, profile_id, "config")
+        system_prompt = CONFIG.AI_NAME + " : tu es une assistante vocale francophone, tavernière RPG."
+        if config_path.exists():
             try:
-                data = json.loads(path.read_text())
-                self.cache[cache_key] = data
-                return data
-            except Exception:
-                return {"messages": []}
-        return {"messages": []}
-    
-    async def save_memory(self, user_id: str, profile_id: str, layer: str, data: Dict):
-        """Save memory layer atomically and update cache."""
-        path = self._profile_path(user_id, profile_id, layer)
-        self._atomic_write(path, data)
-        cache_key = f"{user_id}:{profile_id}:{layer}"
-        self.cache[cache_key] = data
-    
-    async def append_message(self, user_id: str, profile_id: str, role: str, content: str):
-        """Append a message to raw memory (layer 1)."""
-        memory = await self.load_memory(user_id, profile_id, "json")
-        if "messages" not in memory:
-            memory["messages"] = []
-        
-        memory["messages"].append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.utcnow().isoformat()
-        })
-        
-        # Keep only last 80 turns (160 messages)
-        if len(memory["messages"]) > 160:
-            memory["messages"] = memory["messages"][-160:]
-        
-        await self.save_memory(user_id, profile_id, "json", memory)
-    
-    async def build_context(self, user_id: str, profile_id: str, max_tokens: int = 2000) -> List[Dict]:
-        """Build conversation context from memory layers."""
-        raw = await self.load_memory(user_id, profile_id, "json")
-        fast = await self.load_memory(user_id, profile_id, "fast")
-        secondary = await self.load_memory(user_id, profile_id, "secondary")
-        
-        context = []
-        
-        # Add compressed preferences from fast layer
-        if "preferences" in fast:
-            context.append({
-                "role": "system",
-                "content": f"User preferences: {json.dumps(fast['preferences'])}"
-            })
-        
-        # Add episodic facts from secondary
-        if "facts" in secondary:
-            for fact in secondary["facts"][-5:]:
-                context.append({
-                    "role": "system",
-                    "content": f"Important fact: {fact}"
-                })
-        
-        # Add recent conversation from raw
-        messages = raw.get("messages", [])[-20:]  # Last 20 messages
-        context.extend(messages)
-        
+                cfg = json.loads(config_path.read_text(encoding="utf-8"))
+                system_prompt = cfg.get("system_prompt", system_prompt)
+            except:
+                pass
+
+        context = [{"role": "system", "content": system_prompt}]
+
+        fast = self.load_memory(user_id, profile_id, "fast")
+        if fast["items"]:
+            context.append({"role": "system", "content": "Préférences utilisateur :\n" + "\n".join(f"• {item}" for item in fast["items"][:5])})
+
+        secondary = self.load_memory(user_id, profile_id, "secondary")
+        if secondary["items"]:
+            context.append({"role": "system", "content": "Faits notables :\n" + "\n".join(f"• {item}" for item in secondary["items"][-5:])})
+
+        raw = self.load_memory(user_id, profile_id, "raw")
+        recent_turns = raw.get("turns", [])[-CONFIG.MEMORY_PROMPT_TURNS*2:]
+        for turn in recent_turns:
+            if turn.get("user"):
+                context.append({"role": "user", "content": turn["user"]})
+            if turn.get("assistant"):
+                context.append({"role": "assistant", "content": turn["assistant"]})
+
         return context
-    
-    async def compress_memory(self, user_id: str, profile_id: str):
-        """Compress raw memory into fast and secondary layers (called by optimizer)."""
-        raw = await self.load_memory(user_id, profile_id, "json")
-        fast = await self.load_memory(user_id, profile_id, "fast")
-        secondary = await self.load_memory(user_id, profile_id, "secondary")
-        
-        # Simple compression: extract preferences from user messages
-        user_msgs = [m for m in raw.get("messages", []) if m["role"] == "user"]
-        if user_msgs:
-            # Extract keywords (naive approach)
-            preferences = fast.get("preferences", {})
-            for msg in user_msgs[-10:]:
-                content = msg["content"].lower()
-                if "j'aime" in content or "like" in content:
-                    # Could parse further - keep simple for now
-                    preferences["likes"] = True
-                if "déteste" in content or "hate" in content:
-                    preferences["dislikes"] = True
-            
-            fast["preferences"] = preferences
-            await self.save_memory(user_id, profile_id, "fast", fast)
-        
-        # Secondary: important episode extraction (simplified)
-        facts = secondary.get("facts", [])
-        # Add some identifiers
-        if len(raw.get("messages", [])) % 50 == 0:
-            facts.append(f"Conversation milestone: {len(raw.get('messages', []))} messages")
-        secondary["facts"] = facts[-50:]  # Keep last 50
-        await self.save_memory(user_id, profile_id, "secondary", secondary)
 
-memory_mgr = MemoryManager(CONFIG.BASE_DIR)
+    def compress_memory(self, user_id: str, profile_id: str) -> None:
+        """Heuristic compression: extract preferences and episodic facts."""
+        raw = self.load_memory(user_id, profile_id, "raw")
+        fast = self.load_memory(user_id, profile_id, "fast")
+        secondary = self.load_memory(user_id, profile_id, "secondary")
 
-# ============================================
-# SECTION 4: LLM STREAMING WITH ROTATION
-# ============================================
+        likes = fast.get("items", [])
+        dislikes = []
+        facts = secondary.get("items", [])
+
+        for turn in raw.get("turns", []):
+            user_text = turn.get("user", "").lower()
+            assistant_text = turn.get("assistant", "")
+
+            if any(word in user_text for word in ["j'aime", "j'adore", "aime bien"]):
+                likes.append(user_text[:100])
+            if any(word in user_text for word in ["je déteste", "je n'aime pas"]):
+                dislikes.append(user_text[:100])
+
+            if any(word in assistant_text.lower() for word in ["souviens-toi", "important", "retenir"]):
+                facts.append(assistant_text[:150])
+
+        fast["items"] = list(set(likes + dislikes))[-20:]
+        secondary["items"] = list(set(facts))[-20:]
+
+        self.save_memory(user_id, profile_id, "fast", fast)
+        self.save_memory(user_id, profile_id, "secondary", secondary)
+
+memory_mgr = MemoryManager()
+
+# ============================================================================
+# LLM STREAMER
+# ============================================================================
 
 class LLMStreamer:
-    """Handles LLM streaming with model rotation fallback."""
-    
     def __init__(self):
         self.client = httpx.AsyncClient(timeout=30.0)
-        self.models = [CONFIG.OPENROUTER_MODEL] + CONFIG.OPENROUTER_FALLBACK_MODELS
-        self.usage_file = CONFIG.BASE_DIR / "llm_usage.json"
-    
-    async def _record_usage(self, model: str, tokens: int):
-        """Record token usage for billing/stats."""
-        usage = {}
-        if self.usage_file.exists():
-            usage = json.loads(self.usage_file.read_text())
-        
-        key = datetime.utcnow().strftime("%Y-%m-%d")
-        if key not in usage:
-            usage[key] = []
-        
-        usage[key].append({
-            "model": model,
-            "tokens": tokens,
-            "timestamp": datetime.utcnow().isoformat()
-        })
-        
-        memory_mgr._atomic_write(self.usage_file, usage)
-    
-    async def stream_llm(
-        self,
-        messages: List[Dict[str, str]],
-        model_override: Optional[str] = None,
-        on_chunk: Optional[callable] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Stream LLM response with fallback rotation.
-        Filters <think> / <reasoning> / <scratchpad> blocks.
-        """
-        models_to_try = [model_override] if model_override else self.models[:CONFIG.OPENROUTER_MAX_MODEL_TRIES]
-        
-        headers = {
-            "Authorization": f"Bearer {CONFIG.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8000",
-            "X-Title": CONFIG.AI_NAME,
-        }
-        
+        self.models = [CONFIG.OPENROUTER_MODEL] + CONFIG.OPENROUTER_FALLBACK_MODELS.split(",")
+        self.usage_path = Path("memory_profiles") / "llm_usage.json"
+        self.usage_path.parent.mkdir(exist_ok=True)
+
+    def _filter_tags(self, text: str) -> str:
+        """Remove reasoning/analysis tags."""
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<scratchpad>.*?</scratchpad>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<analysis>.*?</analysis>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        return text.strip()
+
+    async def _record_usage(self, model: str, prompt_tokens: int, completion_tokens: int) -> None:
+        """Record usage statistics atomically."""
+        try:
+            if self.usage_path.exists():
+                data = json.loads(self.usage_path.read_text(encoding="utf-8"))
+            else:
+                data = {"version": 1, "chat": {"free": {}, "paid": {}}}
+
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            bucket_type = "free" if ":free" in model else "paid"
+
+            if today not in data["chat"][bucket_type]:
+                data["chat"][bucket_type][today] = {
+                    "requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "estimated_usd": 0.0
+                }
+
+            data["chat"][bucket_type][today]["requests"] += 1
+            data["chat"][bucket_type][today]["prompt_tokens"] += prompt_tokens
+            data["chat"][bucket_type][today]["completion_tokens"] += completion_tokens
+
+            atomic_write_json(self.usage_path, data)
+        except Exception as e:
+            print(f"Usage record error: {e}")
+
+    async def stream_llm(self, messages: List[Dict[str, str]], model_override: Optional[str] = None,
+                        on_chunk: Optional[callable] = None) -> AsyncGenerator[str, None]:
+        """Stream LLM response with fallback models and reasoning bail-out."""
+        models = [model_override] if model_override else self.models
         last_error = None
-        
-        for model in models_to_try:
+
+        for model in models[:CONFIG.OPENROUTER_MAX_MODEL_TRIES]:
             try:
+                headers = {
+                    "Authorization": f"Bearer {CONFIG.OPENROUTER_API_KEY[:8]}***",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": CONFIG.HTTP_REFERER,
+                    "X-Title": CONFIG.APP_TITLE,
+                }
                 payload = {
                     "model": model,
                     "messages": messages,
@@ -291,102 +351,80 @@ class LLMStreamer:
                     "max_tokens": 1024,
                     "temperature": 0.7,
                 }
-                
-                async with self.client.stream(
-                    "POST",
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=30.0
-                ) as resp:
+
+                async with self.client.stream("POST", "https://openrouter.ai/api/v1/chat/completions",
+                                            headers=headers, json=payload, timeout=30.0) as resp:
                     if resp.status_code != 200:
-                        raise Exception(f"HTTP {resp.status_code}: {await resp.aread()}")
-                    
-                    buffer = ""
-                    reasoning_buffer = ""
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
+
+                    reasoning_buffer = []
                     in_reasoning = False
-                    total_tokens = 0
-                    
+                    full_response = ""
+
                     async for line in resp.aiter_lines():
                         if not line.startswith("data: "):
                             continue
-                        data = line[6:]
+                        data = line[6:].strip()
                         if data == "[DONE]":
                             break
-                        
+
                         try:
                             chunk = json.loads(data)
                             delta = chunk.get("choices", [{}])[0].get("delta", {})
+
                             content = delta.get("content", "")
                             reasoning = delta.get("reasoning", "")
-                            
-                            # Handle reasoning content separately (bail-out if too large)
+
                             if reasoning:
-                                reasoning_buffer += reasoning
-                                if len(reasoning_buffer) > 8192:
-                                    # Reasoning bail-out: send summary and stop
+                                reasoning_buffer.append(reasoning)
+                                combined_reasoning = "".join(reasoning_buffer)
+                                if len(combined_reasoning) > CONFIG.REASONING_BAIL_MAX_CHARS:
                                     yield "[RAISONNEMENT TROP LONG - INTERRUPTION]"
+                                    reasoning_buffer = []
+                                    in_reasoning = False
                                     break
-                            
-                            # Filter special tags
+
                             if content:
-                                # Filter <think> / <reasoning> / <scratchpad> blocks
                                 filtered = self._filter_tags(content)
                                 if filtered:
-                                    buffer += filtered
+                                    full_response += filtered
                                     if on_chunk:
                                         await on_chunk(filtered)
                                     yield filtered
-                            
-                            # Track usage
-                            total_tokens += delta.get("tokens", 0) or 0
-                            
+
                         except json.JSONDecodeError:
                             continue
-                    
-                    # Record usage
-                    await self._record_usage(model, total_tokens)
-                    return
-                    
+
+                prompt_tokens = resp.headers.get("X-Openrouter-Prompt-Tokens", "0")
+                completion_tokens = resp.headers.get("X-Openrouter-Completion-Tokens", "0")
+                await self._record_usage(model, int(prompt_tokens), int(completion_tokens))
+                return
+
             except Exception as e:
-                last_error = e
+                last_error = str(e)
+                print(f"LLM error with model {model}: {e}")
                 continue
-        
+
         raise Exception(f"All models failed. Last error: {last_error}")
-    
-    def _filter_tags(self, text: str) -> str:
-        """Remove <think> / <reasoning> / <scratchpad> blocks."""
-        import re
-        patterns = [
-            r'<think>.*?</think>',
-            r'<reasoning>.*?</reasoning>',
-            r'<scratchpad>.*?</scratchpad>'
-        ]
-        for pattern in patterns:
-            text = re.sub(pattern, '', text, flags=re.DOTALL)
-        return text.strip()
 
 llm_streamer = LLMStreamer()
 
-# ============================================
-# SECTION 5: TTS WORKER (QUEUE-BASED)
-# ============================================
+# ============================================================================
+# TTS WORKER
+# ============================================================================
 
 class TTSWorker:
-    """TTS worker with queue, edge-tts primary, Piper fallback."""
-    
     def __init__(self):
-        self.queue: asyncio.Queue = asyncio.Queue()
+        self.queue = asyncio.Queue()
         self.running = False
-        self.task: Optional[asyncio.Task] = None
-    
+        self.task = None
+
     async def start(self):
-        """Start the TTS worker."""
         self.running = True
         self.task = asyncio.create_task(self._worker_loop())
-    
+
     async def stop(self):
-        """Stop the TTS worker."""
         self.running = False
         if self.task:
             self.task.cancel()
@@ -394,517 +432,786 @@ class TTSWorker:
                 await self.task
             except asyncio.CancelledError:
                 pass
-    
-    async def _worker_loop(self):
-        """Main TTS worker loop."""
-        while self.running:
-            try:
-                item = await asyncio.wait_for(self.queue.get(), timeout=1.0)
-                await self._synthesize(item["text"], item["websocket"])
-                self.queue.task_done()
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                print(f"TTS worker error: {e}")
-    
-    async def _synthesize(self, text: str, websocket: WebSocket):
-        """Synthesize text to speech and send via WebSocket."""
+
+    async def enqueue(self, text: str, websocket: WebSocket):
+        await self.queue.put({"text": text, "websocket": websocket})
+
+    def split_into_tts_segments(self, text: str) -> List[str]:
+        """Segment text for TTS, avoiding numeric/abbreviation splits."""
+        if not text:
+            return []
+
+        sentences = re.split(r'(?<=[.!?;])\s+', text.strip())
+        if len(sentences) <= 1:
+            return [text] if text else []
+
+        segments = []
+        current = sentences[0]
+
+        for sentence in sentences[1:]:
+            if len(current) + len(sentence) < 100:
+                current += " " + sentence
+            else:
+                if current:
+                    segments.append(current.strip())
+                current = sentence
+
+        if current:
+            segments.append(current.strip())
+
+        result = []
+        for seg in segments:
+            if len(seg) <= 250:
+                result.append(seg)
+            else:
+                commas = [m.end() for m in re.finditer(r',\s+(?=[A-ZÀ-Ú])', seg)]
+                if commas and commas[-1] > 50:
+                    last_good = commas[-1]
+                    before = seg[:last_good-1].strip()
+                    after = seg[last_good:].strip()
+                    if before:
+                        result.append(before)
+                    if after:
+                        result.append(after)
+                else:
+                    words = seg.split()
+                    mid = len(words) // 2
+                    result.append(" ".join(words[:mid]).strip())
+                    result.append(" ".join(words[mid:]).strip())
+
+        return [s for s in result if s]
+
+    async def _synthesize(self, text: str, websocket: WebSocket) -> None:
+        """Synthesize speech using Edge TTS with Piper fallback."""
+        if not text.strip():
+            return
+
+        audio_data = None
+
         try:
-            # Try edge-tts first
+            from edge_tts import Communicate
             communicate = Communicate(
                 text,
                 CONFIG.EDGE_VOICE,
-                rate=CONFIG.EDGE_RATE
+                rate=CONFIG.EDGE_RATE,
+                pitch=CONFIG.EDGE_PITCH,
+                volume=CONFIG.EDGE_VOLUME
             )
-            
-            audio_chunks = []
+            chunks = []
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
-                    audio_chunks.append(chunk["data"])
-            
-            if audio_chunks:
-                audio_data = b"".join(audio_chunks)
-                b64_audio = self._bytes_to_base64(audio_data)
-                await websocket.send_json({
-                    "type": "tts_audio",
-                    "data": b64_audio
-                })
-                return
+                    chunks.append(chunk["data"])
+            if chunks:
+                audio_data = b"".join(chunks)
         except Exception as e:
-            print(f"edge-tts failed: {e}")
-        
-        # Fallback to Piper if configured
-        if CONFIG.PIPER_BIN and CONFIG.PIPER_MODEL_PATH:
+            print(f"Edge TTS error: {e}")
+
+        if not audio_data and CONFIG.PIPER_BIN and CONFIG.PIPER_MODEL_PATH:
             try:
-                # Run piper in subprocess (sync -> thread)
                 proc = await asyncio.create_subprocess_exec(
-                    CONFIG.PIPER_BIN,
-                    "--model", CONFIG.PIPER_MODEL_PATH,
+                    CONFIG.PIPER_BIN, "--model", CONFIG.PIPER_MODEL_PATH,
                     "--output_file", "/tmp/tts_output.wav",
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
-                await proc.communicate(text.encode())
-                
+                await proc.communicate(input=text.encode())
                 if proc.returncode == 0:
                     audio_data = Path("/tmp/tts_output.wav").read_bytes()
-                    b64_audio = self._bytes_to_base64(audio_data)
-                    await websocket.send_json({
-                        "type": "tts_audio",
-                        "data": b64_audio
-                    })
             except Exception as e:
-                print(f"Piper fallback failed: {e}")
-    
-    def _bytes_to_base64(self, data: bytes) -> str:
-        """Convert bytes to base64 string."""
-        import base64
-        return base64.b64encode(data).decode('utf-8')
-    
-    async def enqueue(self, text: str, websocket: WebSocket):
-        """Add text to TTS queue."""
-        await self.queue.put({"text": text, "websocket": websocket})
+                print(f"Piper TTS error: {e}")
+
+        if audio_data:
+            try:
+                b64 = base64.b64encode(audio_data).decode()
+                await websocket.send_json({"type": "tts_audio", "data": b64})
+            except Exception as e:
+                print(f"TTS send error: {e}")
+
+    async def _worker_loop(self):
+        while self.running:
+            try:
+                item = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+                try:
+                    await self._synthesize(item["text"], item["websocket"])
+                finally:
+                    self.queue.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"TTS worker error: {e}")
 
 tts_worker = TTSWorker()
 
-# ============================================
-# SECTION 6: WEB SEARCH (4-LEVEL FALLBACK)
-# ============================================
+# ============================================================================
+# WEB SEARCHER (4-level fallback)
+# ============================================================================
 
 class WebSearcher:
-    """Multi-level web search with progressively simpler fallbacks."""
-    
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=8.0, follow_redirects=True)
-    
+        self.client = httpx.AsyncClient(timeout=8.0)
+
     async def search(self, query: str) -> str:
-        """
-        Search web with 4-level fallback chain:
-        Tavily → DDGS → DuckDuckGo HTML scrape → Instant Answer
-        """
-        # Level 1: Tavily API
-        if CONFIG.TAVILY_API_KEY:
+        providers = []
+
+        if CONFIG.WEB_SEARCH_PROVIDER == "tavily" or CONFIG.WEB_SEARCH_PROVIDER == "auto":
+            if CONFIG.TAVILY_API_KEY:
+                providers.append(self._search_tavily)
+
+        if CONFIG.WEB_SEARCH_PROVIDER in ["ddgs", "auto"]:
+            providers.append(self._search_ddgs)
+
+        if CONFIG.WEB_SEARCH_PROVIDER in ["duckduckgo", "auto"]:
+            providers.append(self._search_html_scrape)
+
+        if CONFIG.WEB_SEARCH_PROVIDER in ["instant", "auto"]:
+            providers.append(self._search_instant)
+
+        for provider in providers:
             try:
-                result = await self._search_tavily(query)
-                if result:
-                    return result
+                result = await provider(query)
+                if result and result.strip():
+                    return result.strip()[:2000]
             except Exception as e:
-                print(f"Tavily failed: {e}")
-        
-        # Level 2: DDGS (duckduckgo-search library - sync)
-        try:
-            result = await asyncio.to_thread(self._search_ddgs, query)
-            if result:
-                return result
-        except Exception as e:
-            print(f"DDGS failed: {e}")
-        
-        # Level 3: DuckDuckGo HTML scrape
-        try:
-            result = await self._search_ddg_html(query)
-            if result:
-                return result
-        except Exception as e:
-            print(f"DDG HTML failed: {e}")
-        
-        # Level 4: Instant Answer API
-        try:
-            result = await self._search_instant_answer(query)
-            if result:
-                return result
-        except Exception as e:
-            print(f"Instant Answer failed: {e}")
-        
+                print(f"Search provider error: {e}")
+                continue
+
         return ""
-    
+
     async def _search_tavily(self, query: str) -> str:
-        """Tavily API search."""
+        if not CONFIG.TAVILY_API_KEY:
+            return ""
         resp = await self.client.post(
             "https://api.tavily.com/search",
-            json={
-                "api_key": CONFIG.TAVILY_API_KEY,
-                "query": query,
-                "max_results": 3,
-                "include_answer": True
-            }
+            json={"api_key": CONFIG.TAVILY_API_KEY, "query": query, "max_results": 3, "include_answer": True}
         )
-        data = resp.json()
-        if "answer" in data and data["answer"]:
-            return data["answer"]
-        return ""
-    
-    def _search_ddgs(self, query: str) -> str:
-        """DDGS library search (sync)."""
+        if resp.status_code == 200:
+            return resp.json().get("answer", "")
+
+    async def _search_ddgs(self, query: str) -> str:
         try:
             from duckduckgo_search import DDGS
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=3))
-                if results:
-                    return results[0]["body"]
+            results = await asyncio.to_thread(lambda: list(DDGS().text(query, max_results=3)))
+            if results:
+                return results[0].get("body", "")
         except ImportError:
+            print("duckduckgo-search not installed")
+        return ""
+
+    async def _search_html_scrape(self, query: str) -> str:
+        try:
+            resp = await self.client.get("https://html.duckduckgo.com/html/", params={"q": query}, timeout=5.0)
+            if resp.status_code == 200:
+                match = re.search(r'<a class="[^"]*?result__a[^"]*?"[^>]*?>(.*?)</a>', resp.text)
+                if match:
+                    return re.sub(r'<[^>]+>', '', match.group(1))[:500]
+        except:
             pass
         return ""
-    
-    async def _search_ddg_html(self, query: str) -> str:
-        """DuckDuckGo HTML scrape."""
-        resp = await self.client.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; AriBot/1.0)"}
-        )
-        # Very basic parsing
-        import re
-        match = re.search(r'<a class="result__a" href="[^"]*">(.*?)</a>', resp.text)
-        if match:
-            return match.group(1).strip()
-        return ""
-    
-    async def _search_instant_answer(self, query: str) -> str:
-        """DuckDuckGo Instant Answer API."""
-        resp = await self.client.get(
-            "https://api.duckduckgo.com/",
-            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1}
-        )
-        data = resp.json()
-        if data.get("Answer"):
-            return data["Answer"]
-        if data.get("Abstract"):
-            return data["Abstract"]
+
+    async def _search_instant(self, query: str) -> str:
+        try:
+            resp = await self.client.get("https://api.duckduckgo.com/", params={
+                "q": query, "format": "json", "no_html": 1, "no_redirect": 1
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("Answer") or data.get("Abstract", "")[:500]
+        except:
+            pass
         return ""
 
 web_searcher = WebSearcher()
 
-# ============================================
-# SECTION 7: HTTP ROUTES
-# ============================================
+# ============================================================================
+# 2FA MANAGER
+# ============================================================================
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    asyncio.create_task(memory_optimizer_loop())
-    await tts_worker.start()
-    yield
-    # Shutdown
-    await tts_worker.stop()
-    await llm_streamer.client.aclose()
-    await web_searcher.client.aclose()
+class TwoFAManager:
+    def __init__(self):
+        self.codes: Dict[str, Dict[str, Any]] = {}
 
-app = FastAPI(lifespan=lifespan)
+    def begin(self, user_id: str) -> str:
+        code = str(secrets.randbelow(9000) + 1000)
+        expires = datetime.utcnow() + timedelta(seconds=120)
+        self.codes[user_id] = {"code": code, "expires": expires, "attempts": 0}
+        print(f"[2FA] Code for {user_id}: {code}")
+        return code
 
-# CORS
-from fastapi.middleware.cors import CORSMiddleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    def verify(self, user_id: str, code: str) -> bool:
+        if user_id not in self.codes:
+            return False
 
-# Static files
-app.mount("/assets", StaticFiles(directory=str(CONFIG.ASSETS_DIR)), name="assets")
+        entry = self.codes[user_id]
+        if entry["attempts"] >= 3:
+            del self.codes[user_id]
+            return False
 
+        if datetime.utcnow() > entry["expires"]:
+            del self.codes[user_id]
+            return False
 
+        if code != entry["code"]:
+            entry["attempts"] += 1
+            if entry["attempts"] >= 3:
+                del self.codes[user_id]
+            return False
 
-# ============ AUTH HTTP ROUTES ============
+        del self.codes[user_id]
+        return True
 
-@app.get("/")
-async def root():
-    """Serve index.html with no-cache headers."""
-    index_path = CONFIG.BASE_DIR / "index.html"
-    if not index_path.exists():
-        raise HTTPException(status_code=404, detail="index.html not found")
-    content = index_path.read_text()
-    return HTMLResponse(
-        content=content,
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
-    )
+    def is_pending(self, user_id: str) -> bool:
+        if user_id not in self.codes:
+            return False
+        entry = self.codes[user_id]
+        if datetime.utcnow() > entry["expires"]:
+            del self.codes[user_id]
+            return False
+        return True
 
-@app.get("/api/library")
-async def get_library():
-    """Get library of 3D models, backgrounds, Live2D."""
-    library = {
-        "models": [],
-        "backgrounds": [],
-        "live2d": []
-    }
-    
-    # Scan directories
-    for item in CONFIG.ASSETS_DIR.rglob("*"):
-        if item.is_file():
-            rel = item.relative_to(CONFIG.ASSETS_DIR)
-            parts = rel.parts
-            
-            if parts[0] == "models":
-                library["models"].append(LibraryItem(
-                    name=item.stem,
-                    path=f"/assets/{rel}",
-                    type="model"
-                ).dict())
-            elif parts[0] == "backgrounds":
-                library["backgrounds"].append(LibraryItem(
-                    name=item.stem,
-                    path=f"/assets/{rel}",
-                    type="background"
-                ).dict())
-            elif parts[0] == "live2d":
-                library["live2d"].append(LibraryItem(
-                    name=item.stem,
-                    path=f"/assets/{rel}",
-                    type="live2d"
-                ).dict())
-    
-    return library
+twofa_mgr = TwoFAManager()
 
-@app.get("/api/animation-catalog")
-async def get_animation_catalog():
-    """Get catalog of available animations."""
-    catalog = []
-    animations_dir = CONFIG.ASSETS_DIR / "animations"
-    if animations_dir.exists():
-        for item in animations_dir.iterdir():
-            if item.is_file() and item.suffix in [".json", ".anim"]:
-                catalog.append(AnimationCatalog(
-                    id=item.stem,
-                    name=item.stem.replace("_", " ").title(),
-                    preview_url=f"/assets/animations/{item.name}" if item.suffix == ".png" else None,
-                    tags=[]
-                ).dict())
-    return catalog
-
-@app.post("/api/upload/animation")
-async def upload_animation(file: UploadFile = File(...)):
-    """Upload animation file."""
-    return await _handle_upload(file, CONFIG.UPLOAD_DIR / "animations")
-
-@app.post("/api/upload/background")
-async def upload_background(file: UploadFile = File(...)):
-    """Upload background file."""
-    return await _handle_upload(file, CONFIG.UPLOAD_DIR / "backgrounds")
-
-@app.post("/api/upload/model")
-async def upload_model(file: UploadFile = File(...)):
-    """Upload 3D model file."""
-    return await _handle_upload(file, CONFIG.UPLOAD_DIR / "models")
-
-@app.post("/api/upload/live2d")
-async def upload_live2d(file: UploadFile = File(...)):
-    """Upload Live2D model."""
-    return await _handle_upload(file, CONFIG.UPLOAD_DIR / "live2d")
-
-async def _handle_upload(file: UploadFile, dest_dir: Path) -> dict:
-    """Generic upload handler with zip-slip protection."""
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / file.filename
-    
-    # Basic path traversal check
-    if ".." in file.filename or file.filename.startswith("/"):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    
-    content = await file.read()
-    dest.write_bytes(content)
-    
-    return {"status": "ok", "filename": file.filename, "size": len(content)}
-
-@app.get("/api/usage/{user}/{profile}")
-async def get_usage(user: str, profile: str):
-    """Get LLM usage statistics."""
-    usage_file = CONFIG.BASE_DIR / "llm_usage.json"
-    if usage_file.exists():
-        usage = json.loads(usage_file.read_text())
-        return usage
-    return {}
-
-# ============================================
-# SECTION 8: WEBSOCKET /ws
-# ============================================
+# ============================================================================
+# CONNECTION MANAGER & SESSION STATE
+# ============================================================================
 
 class ConnectionManager:
-    """Manages WebSocket connections with heartbeat."""
-    
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
-        self.heartbeat_task: Optional[asyncio.Task] = None
-    
-    async def connect(self, websocket: WebSocket, client_id: str):
+        self.heartbeat_interval = 25
+
+    async def connect(self, client_id: str, websocket: WebSocket):
         await websocket.accept()
         self.active_connections[client_id] = websocket
-    
+        asyncio.create_task(self._heartbeat(client_id))
+
     def disconnect(self, client_id: str):
         if client_id in self.active_connections:
             del self.active_connections[client_id]
-    
+
     async def send_json(self, client_id: str, data: dict):
-        """Send JSON to a specific client."""
-        if client_id in self.active_connections:
+        ws = self.active_connections.get(client_id)
+        if ws:
             try:
-                await self.active_connections[client_id].send_json(data)
-            except Exception:
-                self.disconnect(client_id)
-    
-    async def heartbeat_loop(self):
-        """Send periodic heartbeat to all connections."""
-        while True:
-            await asyncio.sleep(25)
-            for cid, ws in list(self.active_connections.items()):
-                try:
-                    await ws.send_json({"type": "heartbeat"})
-                except Exception:
-                    self.disconnect(cid)
+                await ws.send_json(data)
+            except:
+                pass
+
+    async def _heartbeat(self, client_id: str):
+        while client_id in self.active_connections:
+            await asyncio.sleep(self.heartbeat_interval)
+            try:
+                await self.send_json(client_id, {"type": "heartbeat"})
+            except:
+                break
 
 manager = ConnectionManager()
 
-# 2FA storage (in-memory, per user)
+class SessionState:
+    def __init__(self, client_id: str, user_id: str, profile_id: str):
+        self.client_id = client_id
+        self.user_id = user_id
+        self.profile_id = profile_id
+        self.authenticated = False
+        self.config_path = memory_mgr._profile_path(user_id, profile_id, "config")
+        self._load_config()
+
+    def _load_config(self):
+        default = {
+            "ai_name": CONFIG.AI_NAME,
+            "model": CONFIG.OPENROUTER_MODEL,
+            "system_prompt": "",
+            "edge_voice": CONFIG.EDGE_VOICE,
+            "edge_rate": CONFIG.EDGE_RATE,
+            "edge_pitch": CONFIG.EDGE_PITCH,
+            "edge_volume": CONFIG.EDGE_VOLUME,
+            "tts_engine": "auto",
+            "temperature": 0.7,
+            "max_tokens": 1024,
+            "internet_enabled": CONFIG.INTERNET_ENABLED_DEFAULT,
+            "avatar_config": {}
+        }
+        if self.config_path.exists():
+            try:
+                data = json.loads(self.config_path.read_text(encoding="utf-8"))
+                default.update(data)
+            except:
+                pass
+        self.ai_name = default["ai_name"]
+        self.model = default["model"]
+        self.system_prompt = default["system_prompt"] or f"Tu es {self.ai_name}, une assistante vocale francophone."
+        self.edge_voice = default["edge_voice"]
+        self.edge_rate = default["edge_rate"]
+        self.edge_pitch = default["edge_pitch"]
+        self.edge_volume = default["edge_volume"]
+        self.tts_engine = default["tts_engine"]
+        self.temperature = default["temperature"]
+        self.max_tokens = default["max_tokens"]
+        self.internet_enabled = default["internet_enabled"]
+        self.avatar_config = default["avatar_config"]
+
+    def save_config(self):
+        data = {
+            "ai_name": self.ai_name,
+            "model": self.model,
+            "system_prompt": self.system_prompt,
+            "edge_voice": self.edge_voice,
+            "edge_rate": self.edge_rate,
+            "edge_pitch": self.edge_pitch,
+            "edge_volume": self.edge_volume,
+            "tts_engine": self.tts_engine,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "internet_enabled": self.internet_enabled,
+            "avatar_config": self.avatar_config
+        }
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(self.config_path, data)
+
+sessions: Dict[str, SessionState] = {}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def is_localhost(request: Request) -> bool:
+    client_host = request.client.host if request.client else ""
+    return client_host in ("127.0.0.1", "::1", "localhost")
+
+def sanitize_filename(filename: str) -> str:
+    return Path(filename).name
+
+def is_zip_safe(base_dir: Path, target_path: Path) -> bool:
+    try:
+        resolved = target_path.resolve()
+        resolved_base = base_dir.resolve()
+        return resolved.is_relative_to(resolved_base)
+    except:
+        return False
+
+def detect_emotion(text: str) -> str:
+    text_lower = text.lower()
+    if any(word in text_lower for word in ["content", "joyeu", "heureux", "excellente", "parfait"]):
+        return "happy"
+    if any(word in text_lower for word in ["triste", "désolé", "excuse", "malheureusement"]):
+        return "sad"
+    if any(word in text_lower for word in ["colère", "énervé", "fâché"]):
+        return "angry"
+    if any(word in text_lower for word in ["surpris", "ah bon", "vraiment"]):
+        return "surprised"
+    return "neutral"
+
+LEAK_PATTERNS = [
+    re.compile(r"règle prioritaire", re.IGNORECASE),
+    re.compile(r"tu dois l'appeler par", re.IGNORECASE),
+    re.compile(r"\bsystem says\b", re.IGNORECASE),
+    re.compile(r"\bthe instruction says\b", re.IGNORECASE),
+]
+
+def check_prompt_leak(text: str) -> bool:
+    return any(p.search(text) for p in LEAK_PATTERNS)
+
+# ============================================================================
+# FASTAPI APP SETUP
+# ============================================================================
+
+app = FastAPI(title=CONFIG.APP_TITLE)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
+# ============================================================================
+# BACKGROUND TASKS
+# ============================================================================
+
+async def memory_optimizer_loop():
+    """Periodically compress memory for all users."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            base = Path("memory_profiles")
+            if base.exists():
+                for user_dir in base.iterdir():
+                    if user_dir.is_dir():
+                        for profile_dir in user_dir.iterdir():
+                            if profile_dir.is_dir():
+                                try:
+                                    memory_mgr.compress_memory(user_dir.name, profile_dir.name)
+                                except Exception as e:
+                                    print(f"Optimize error {user_dir.name}/{profile_dir.name}: {e}")
+        except Exception as e:
+            print(f"Optimizer loop error: {e}")
+        await asyncio.sleep(CONFIG.MEMORY_OPTIMIZE_INTERVAL_SEC)
+
+# ============================================================================
+# LIFESPAN
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(memory_optimizer_loop())
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await llm_streamer.client.aclose()
+    await tts_worker.stop()
+    await web_searcher.client.aclose()
+
+# ============================================================================
+# HTTP ROUTES
+# ============================================================================
+
+@app.get("/")
+async def root():
+    return FileResponse("index.html", headers={"Cache-Control": "no-cache"})
+
+@app.get("/assets/{path:path}")
+async def assets(path: str):
+    asset_path = Path("assets") / path
+    if asset_path.exists():
+        return FileResponse(asset_path)
+    raise HTTPException(404)
+
+@app.get("/api/library")
+async def get_library():
+    lib = {"models": [], "backgrounds": [], "live2d": []}
+    assets_dir = Path("assets")
+    if assets_dir.exists():
+        for type_dir in ["models", "backgrounds", "live2d"]:
+            dir_path = assets_dir / type_dir
+            if dir_path.exists():
+                for file in dir_dir.iterdir():
+                    if file.is_file():
+                        lib[type_dir].append({
+                            "name": file.name,
+                            "path": f"/assets/{type_dir}/{file.name}",
+                            "type": type_dir[:-1] if type_dir.endswith('s') else type_dir
+                        })
+    return lib
+
+@app.get("/api/animation-catalog")
+async def get_animation_catalog():
+    catalog_file = Path("assets") / "animation_catalog.json"
+    if catalog_file.exists():
+        try:
+            return json.loads(catalog_file.read_text(encoding="utf-8"))
+        except:
+            pass
+    return {"animations": []}
+
+@app.post("/api/upload/animation")
+async def upload_animation(request: Request):
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "Missing file")
+    dest = Path("assets") / "animations" / sanitize_filename(file.filename)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"status": "ok", "path": f"/assets/animations/{dest.name}"}
+
+@app.post("/api/upload/background")
+async def upload_background(request: Request):
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400)
+    dest = Path("assets") / "backgrounds" / sanitize_filename(file.filename)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"status": "ok"}
+
+@app.post("/api/upload/model")
+async def upload_model(request: Request):
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400)
+    dest = Path("assets") / "models" / sanitize_filename(file.filename)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"status": "ok"}
+
+@app.post("/api/upload/live2d")
+async def upload_live2d(request: Request):
+    form = await request.form()
+    file = form.get("file")
+    if not file or not file.filename.endswith(".zip"):
+        raise HTTPException(400, "Only zip files allowed")
+    dest_dir = Path("assets") / "live2d" / sanitize_filename(file.filename).replace(".zip", "")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    import zipfile
+    content = await file.read()
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        for member in zf.infolist():
+            member_path = dest_dir / member.filename
+            if not is_zip_safe(dest_dir, member_path):
+                raise HTTPException(400, "Zip slip detected")
+            zf.extract(member, dest_dir)
+
+    return {"status": "ok"}
+
+@app.get("/api/conversations/{user}/{profile}")
+async def list_conversations(user: str, profile: str):
+    history_dir = Path("memory_profiles") / user / profile / "history"
+    if not history_dir.exists():
+        return []
+    sessions = []
+    for file in history_dir.glob("*.json"):
+        try:
+            data = json.loads(file.read_text(encoding="utf-8"))
+            sessions.append({"id": file.stem, "title": data.get("title", "Session"), "ts": data.get("ts", "")})
+        except:
+            pass
+    return sorted(sessions, key=lambda x: x.get("ts", ""), reverse=True)
+
+@app.get("/api/conversations/{user}/{profile}/{session_id}")
+async def get_conversation(user: str, profile: str, session_id: str):
+    path = Path("memory_profiles") / user / profile / "history" / f"{session_id}.json"
+    if not path.exists():
+        raise HTTPException(404)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@app.get("/api/usage/{user_id}/{profile_id}")
+async def get_usage(user_id: str, profile_id: str):
+    usage_file = Path("memory_profiles") / "llm_usage.json"
+    if not usage_file.exists():
+        return {"free": {}, "paid": {}}
+    return json.loads(usage_file.read_text(encoding="utf-8"))
+
+# ============================================================================
+# WEBSOCKET ENDPOINT
+# ============================================================================
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Main WebSocket endpoint."""
-    client_id = str(uuid4())
-    await manager.connect(websocket, client_id)
-    # No authentication — anonymous access
-    user_id = f"anon-{client_id}"
+    client_id = secrets.token_urlsafe(8)
+    query_params = dict(websocket.query_params)
+    user_id = query_params.get("user_id", CONFIG.DEFAULT_USER_ID)
+    profile_id = query_params.get("profile_id", CONFIG.DEFAULT_PROFILE_ID)
+    remote_addr = websocket.client.host if websocket.client else ""
 
-    
-    # Start heartbeat task if not running
-    if manager.heartbeat_task is None or manager.heartbeat_task.done():
-        manager.heartbeat_task = asyncio.create_task(manager.heartbeat_loop())
-    
+    is_remote = remote_addr not in ("127.0.0.1", "::1", "localhost")
+
+    await manager.connect(client_id, websocket)
+    session = SessionState(client_id, user_id, profile_id)
+
+    if is_remote and not session.authenticated:
+        pending_auth = True
+    else:
+        pending_auth = False
+        session.authenticated = True
+
+    sessions[client_id] = session
+
     try:
+        await manager.send_json(client_id, {"type": "connected", "client_id": client_id, "requires_2fa": pending_auth})
+
         while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type")
-            
-            if msg_type == "get_config":
-                await websocket.send_json({
-                    "type": "config",
-                    "data": {
-                        "internet_enabled": CONFIG.INTERNET_ENABLED_DEFAULT,
-                        "tts_voice": CONFIG.EDGE_VOICE,
-                        "tts_rate": CONFIG.EDGE_RATE,
-                        "model": CONFIG.OPENROUTER_MODEL,
-                        "fallback_models": CONFIG.OPENROUTER_FALLBACK_MODELS
-                    }
-                })
-            
-            elif msg_type == "set_config":
-                # Update config (runtime only, not persisted)
-                payload = WSConfigUpdate(**data.get("data", {}))
-                # In real implementation, would update config store
-                await websocket.send_json({"type": "config_updated", "data": "ok"})
-            
-            elif msg_type == "user_text":
-                payload = WSUserTextPayload(**data.get("data", {}))
-                user_text = payload.text
-                profile = payload.profile
-                # user_id already set from session validation above
-                
-                # State: thinking
-                await websocket.send_json({"type": "state", "state": "thinking"})
-                
-                try:
-                    # Build memory context
-                    context = await memory_mgr.build_context(user_id, profile)
-                    
-                    # Add system prompt
-                    system_prompt = f"""Tu es {CONFIG.AI_NAME}, un assistant vocal IA amical et serviable.
-Réponds de façon naturelle, concise et utile. Tu es dans une taverne RPG."""
-                    messages = [{"role": "system", "content": system_prompt}] + context + [
-                        {"role": "user", "content": user_text}
-                    ]
-                    
-                    # Decide if web search needed (simple heuristic)
-                    need_web = any(kw in user_text.lower() for kw in ["recherche", "cherche", "actualité", "news", "quoi de neuf"])
-                    web_result = ""
-                    
-                    if need_web and CONFIG.INTERNET_ENABLED_DEFAULT:
-                        await websocket.send_json({"type": "status", "message": "Searching web..."})
-                        web_result = await web_searcher.search(user_text)
-                        if web_result:
-                            messages.insert(-1, {"role": "system", "content": f"Web search result: {web_result}"})
-                    
-                    # Stream LLM and TTS in parallel
-                    full_response = ""
-                    tts_task = None
-                    
-                    async def collect_chunks():
-                        nonlocal full_response
-                        async for chunk in llm_streamer.stream_llm(messages):
-                            full_response += chunk
-                            await websocket.send_json({
-                                "type": "assistant_chunk",
-                                "chunk": chunk
-                            })
-                    
-                    # Start both concurrently
-                    await asyncio.gather(
-                        collect_chunks(),
-                        tts_worker.enqueue(full_response, websocket)  # Will queue after collection
-                    )
-                    
-                    # But we need TTS to start streaming as chunks arrive...
-                    # Better: stream chunks to TTS as they arrive
-                    # (Implement proper streaming in production)
-                    
-                    # Detect emotion (simple keyword-based)
-                    emotion = "neutral"
-                    if any(word in full_response.lower() for word in ["excellent", "génial", "super"]):
-                        emotion = "happy"
-                    elif any(word in full_response.lower() for word in ["désolé", "triste", "malheur"]):
-                        emotion = "sad"
-                    
-                    # Save to memory
-                    await memory_mgr.append_message(user_id, profile, "user", user_text)
-                    await memory_mgr.append_message(user_id, profile, "assistant", full_response)
-                    
-                    # Done
-                    await websocket.send_json({
-                        "type": "assistant_done",
-                        "emotion": emotion,
-                        "full_response": full_response
+            try:
+                data = await websocket.receive_json()
+                msg_type = data.get("type")
+
+                if msg_type == "get_config":
+                    await manager.send_json(client_id, {
+                        "type": "config",
+                        "data": {
+                            "user_id": session.user_id,
+                            "profile_id": session.profile_id,
+                            "ai_name": session.ai_name,
+                            "model": session.model,
+                            "system_prompt": session.system_prompt,
+                            "edge_voice": session.edge_voice,
+                            "edge_rate": session.edge_rate,
+                            "edge_pitch": session.edge_pitch,
+                            "edge_volume": session.edge_volume,
+                            "tts_engine": session.tts_engine,
+                            "temperature": session.temperature,
+                            "max_tokens": session.max_tokens,
+                            "internet_enabled": session.internet_enabled,
+                            "avatar_config": session.avatar_config,
+                        }
                     })
-                    await websocket.send_json({"type": "state", "state": "idle"})
-                    
-                except Exception as e:
-                    await websocket.send_json({"type": "error", "message": str(e)})
-                    await websocket.send_json({"type": "state", "state": "idle"})
-            
-            else:
-                await websocket.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
-    
-    except WebSocketDisconnect:
-        manager.disconnect(client_id)
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-        manager.disconnect(client_id)
 
-# ============================================
-# MEMORY OPTIMIZER LOOP (EVERY 4 HOURS)
-# ============================================
+                elif msg_type == "set_config":
+                    cfg = data.get("data", {})
+                    session.user_id = cfg.get("user_id", session.user_id)
+                    session.profile_id = cfg.get("profile_id", session.profile_id)
+                    session.ai_name = cfg.get("ai_name", session.ai_name)
+                    session.model = cfg.get("model", session.model)
+                    session.system_prompt = cfg.get("system_prompt", session.system_prompt)
+                    session.edge_voice = cfg.get("edge_voice", session.edge_voice)
+                    session.edge_rate = cfg.get("edge_rate", session.edge_rate)
+                    session.edge_pitch = cfg.get("edge_pitch", session.edge_pitch)
+                    session.edge_volume = cfg.get("edge_volume", session.edge_volume)
+                    session.tts_engine = cfg.get("tts_engine", session.tts_engine)
+                    session.temperature = cfg.get("temperature", session.temperature)
+                    session.max_tokens = cfg.get("max_tokens", session.max_tokens)
+                    session.internet_enabled = cfg.get("internet_enabled", session.internet_enabled)
+                    session.avatar_config = cfg.get("avatar_config", session.avatar_config)
+                    session.save_config()
+                    await manager.send_json(client_id, {"type": "config_updated"})
 
-async def memory_optimizer_loop():
-    """Periodic task to compress memories."""
-    while True:
-        await asyncio.sleep(4 * 3600)  # 4 hours
-        
-        # Compress all user profiles
-        profiles_dir = CONFIG.BASE_DIR / "memory_profiles" / "profiles"
-        if profiles_dir.exists():
-            for user_dir in profiles_dir.iterdir():
-                if user_dir.is_dir():
-                    for profile_dir in user_dir.iterdir():
-                        if profile_dir.is_dir():
-                            user_id = user_dir.name
-                            profile_id = profile_dir.name
+                elif msg_type == "auth_2fa_begin":
+                    user_id_auth = data.get("user_id")
+                    if not user_id_auth:
+                        await manager.send_json(client_id, {"type": "error", "message": "user_id required"})
+                        continue
+                    code = twofa_mgr.begin(user_id_auth)
+                    await manager.send_json(client_id, {
+                        "type": "2fa_challenge",
+                        "data": {"user_id": user_id_auth, "message": "Code généré (pour test: dans console)"}
+                    })
+
+                elif msg_type == "auth_2fa_verify":
+                    user_id_verify = data.get("user_id")
+                    code = data.get("code", "")
+                    if twofa_mgr.verify(user_id_verify, code):
+                        session.authenticated = True
+                        session.user_id = user_id_verify
+                        session.profile_id = CONFIG.DEFAULT_PROFILE_ID
+                        await manager.send_json(client_id, {"type": "auth_success"})
+                    else:
+                        await manager.send_json(client_id, {"type": "auth_failure", "message": "Code invalide ou expiré"})
+
+                elif msg_type == "user_text":
+                    if not session.authenticated:
+                        await manager.send_json(client_id, {"type": "error", "message": "Authentification requise"})
+                        continue
+
+                    text = data.get("text", "").strip()
+                    if not text:
+                        continue
+
+                    silent = data.get("silent", False)
+                    profile = data.get("profile", session.profile_id)
+                    user_id = data.get("user_id") or session.user_id
+
+                    try:
+                        await manager.send_json(client_id, {"type": "state", "state": "thinking"})
+
+                        web_ctx_task = None
+                        secondary_task = asyncio.create_task(
+                            memory_mgr.load_memory(user_id, profile, "secondary")
+                        )
+
+                        needs_web = session.internet_enabled and any(
+                            kw in text.lower() for kw in ["recherche", "cherche", "actualité", "news", "quoi de neuf"]
+                        )
+                        if needs_web:
+                            web_ctx_task = asyncio.create_task(web_searcher.search(text))
+
+                        await asyncio.sleep(0)
+
+                        secondary_ctx = await secondary_task
+                        web_ctx = await web_ctx_task if web_ctx_task else ""
+
+                        if needs_web and web_ctx:
+                            await manager.send_json(client_id, {"type": "assistant_chunk", "text": "Je consulte le web..."})
+                            await asyncio.sleep(0.1)
+
+                        context = memory_mgr.build_context(user_id, profile)
+                        if web_ctx:
+                            context.append({"role": "system", "content": f"Résultat web :\n{web_ctx}"})
+                        context.append({"role": "user", "content": text})
+
+                        tts_queue = asyncio.Queue()
+                        await tts_worker.start()
+
+                        full_response = ""
+                        pending_segment = ""
+                        tts_task = asyncio.create_task(tts_worker._worker_loop())
+
+                        async def on_chunk(chunk: str):
+                            await manager.send_json(client_id, {"type": "assistant_chunk", "text": chunk})
+
+                        try:
+                            async for token in llm_streamer.stream_llm(
+                                context,
+                                model_override=session.model if session.model else None,
+                                on_chunk=on_chunk
+                            ):
+                                if check_prompt_leak(token):
+                                    await manager.send_json(client_id, {"type": "assistant_chunk", "text": "[FILTRÉ]"})
+                                    continue
+
+                                full_response += token
+                                pending_segment += token
+
+                                segments = tts_worker.split_into_tts_segments(pending_segment)
+                                if len(segments) > 1:
+                                    for seg in segments[:-1]:
+                                        await tts_queue.put({"text": seg, "websocket": websocket})
+                                    pending_segment = segments[-1]
+
+                                await manager.send_json(client_id, {"type": "assistant_chunk", "text": token})
+                                await asyncio.sleep(0)
+
+                        except Exception as e:
+                            print(f"LLM stream error: {e}")
+                            await manager.send_json(client_id, {"type": "error", "message": "Erreur LLM"})
+
+                        if pending_segment.strip():
+                            await tts_queue.put({"text": pending_segment, "websocket": websocket})
+
+                        await tts_queue.put(None)
+                        await tts_task
+
+                        if not full_response.strip():
+                            full_response = "Désolé, je ne peux pas répondre pour le moment."
+                            await manager.send_json(client_id, {"type": "assistant_chunk", "text": full_response})
+
+                        memory_mgr.append_message(user_id, profile, "user", text)
+                        memory_mgr.append_message(user_id, profile, "assistant", full_response)
+
+                        emotion = detect_emotion(full_response)
+
+                        usage_file = Path("memory_profiles") / "llm_usage.json"
+                        usage_stats = {}
+                        if usage_file.exists():
                             try:
-                                await memory_mgr.compress_memory(user_id, profile_id)
-                            except Exception as e:
-                                print(f"Memory compression failed for {user_id}/{profile_id}: {e}")
+                                usage_stats = json.loads(usage_file.read_text(encoding="utf-8"))
+                            except:
+                                pass
+
+                        await manager.send_json(client_id, {
+                            "type": "assistant_done",
+                            "emotion": emotion,
+                            "usage": usage_stats
+                        })
+                        await manager.send_json(client_id, {"type": "state", "state": "idle"})
+
+                    except Exception as e:
+                        print(f"Handle user_text error: {e}")
+                        await manager.send_json(client_id, {"type": "error", "message": str(e)})
+
+                else:
+                    await manager.send_json(client_id, {"type": "error", "message": f"Unknown message type: {msg_type}"})
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                print(f"WebSocket loop error: {e}")
+                break
+
+    except Exception as e:
+        print(f"WebSocket connection error: {e}")
+    finally:
+        manager.disconnect(client_id)
+        if client_id in sessions:
+            del sessions[client_id]
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 if __name__ == "__main__":
     import uvicorn

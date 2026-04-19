@@ -1,54 +1,37 @@
 # ============================================
-# Ari - Assistant Vocal IA Local
-# Dépendances Python avec versions fixées
+# Ari Assistant — Python Dependencies
+# ============================================
+# Core backend dependencies (no version locks per spec)
 # ============================================
 
-# Framework web API
-fastapi==0.110.0
-uvicorn[standard]==0.27.1
+# Web framework
+fastapi
+uvicorn[standard]
 
-# Gestion des variables d'environnement
-python-dotenv==1.0.1
-pydantic-settings==2.2.1
+# HTTP client (async)
+httpx
 
-# Communication HTTP
-httpx==0.27.0
+# Text-to-Speech
+edge-tts
 
-# Synthèse vocale (Text-to-Speech)
-edge-tts==6.1.9
+# Environment & configuration
+python-dotenv
+pydantic
+pydantic-settings
 
-# Reconnaissance vocale (Speech-to-Text)
-# openai-whisper==20231117  # Optionnel: à installer séparément si besoin
-# Note: whisper nécessite torch, installer via pip install openai-whisper
+# Web search
+duckduckgo-search  # ddgs
+tavily-python
 
-# Recherche web
-duckduckgo-search==6.1.12  # ddgs
-tavily-python==0.3.1
+# Form parsing & file uploads
+python-multipart
 
-# Gestion des formulaires & uploads
-python-multipart==0.0.9
+# Utilities
+typing-extensions
 
-# Sécurité & hash PIN
-bcrypt==4.1.2
+# Optional: Piper TTS subprocess handling (no pip package needed)
+# Piper binary must be installed separately if desired
+# pip install piper-tts is not used; we call piper via subprocess
 
-# Utilitaires
-pydantic==2.6.3
-pydantic-core==2.16.3
-typing-extensions==4.10.0
-
-# Audio processing (optionnel)
-# sounddevice==0.4.6  # Pour capture audio temps réel
-# soundfile==0.12.1   # Pour lecture/écriture fichiers audio
-
-# Logging avancé
-structlog==24.1.0
-
-# Gestion des signaux et processus
-psutil==5.9.6
-
-# ============================================
-# Notes d'installation:
-# - Exécuter: pip install -r requirements.txt
-# - Pour Whisper: pip install openai-whisper
-# - Pour Piper-TTS (optionnel): installer depuis sources
-# ============================================
+# Optional: for development/debugging
+# structlog

@@ -1,1565 +1,1404 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ari - Assistant Vocal IA - Taverne RPG</title>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=MedievalSharp&display=swap" rel="stylesheet">
-    <style>
-        /* RESET & BASE */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        :root {
-            --bg-dark: #0a0a0a;
-            --bg-panel: rgba(30, 20, 10, 0.95);
-            --bg-input: rgba(20, 15, 8, 0.9);
-            --gold-amber: #ffb300;
-            --gold-light: #ffd54f;
-            --blue-cyan: #00bcd4;
-            --blue-dark: #006064;
-            --brown-dark: #3e2723;
-            --brown-light: #5d4037;
-            --text-light: #f5f5dc;
-            --text-dim: #b0a080;
-        }
-        
-        body {
-            font-family: 'Cinzel', serif;
-            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
-            color: var(--text-light);
-            height: 100vh;
-            overflow: hidden;
-            position: relative;
-        }
-        
-        /* NOISE TEXTURE OVERLAY */
-        body::before {
-            content: '';
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
-            pointer-events: none;
-            z-index: 9999;
-        }
-        
-        /* MAIN APP LAYOUT */
-        #app-container {
-            display: none;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* HEADER */
-        .header {
-            height: 60px;
-            background: linear-gradient(180deg, rgba(62, 39, 35, 0.9) 0%, rgba(30, 20, 10, 0.95) 100%);
-            border-bottom: 3px solid var(--gold-amber);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-        }
-        
-        .app-title {
-            font-family: 'MedievalSharp', cursive;
-            font-size: 1.8em;
-            color: var(--gold-amber);
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-        }
-        
-        .header-controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 5px 12px;
-            background: rgba(0,0,0,0.3);
-            border-radius: 20px;
-            font-size: 0.85em;
-        }
-        
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #ff5252;
-            box-shadow: 0 0 5px currentColor;
-            transition: background 0.3s;
-        }
-        
-        .status-dot.connected { background: #4caf50; }
-        .status-dot.connecting { background: #ff9800; }
-        
-        /* MAIN CONTENT AREA */
-        #main-content {
-            flex: 1;
-            display: flex;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        /* AVATAR ZONE (LEFT) */
-        #avatar-zone {
-            width: 45%;
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            background: radial-gradient(ellipse at center, rgba(62, 39, 35, 0.3) 0%, transparent 70%);
-        }
-        
-        #avatar-container {
-            width: 100%;
-            height: 100%;
-            position: relative;
-        }
-        
-        #three-canvas, #pixi-canvas, #pixel-orbe {
-            width: 100%;
-            height: 100%;
-            display: block;
-        }
-        
-        #pixel-orbe {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 200px;
-            height: 200px;
-            background: radial-gradient(circle, var(--gold-amber) 0%, var(--gold-light) 40%, rgba(255,179,0,0) 70%);
-            border-radius: 50%;
-            box-shadow: 0 0 60px var(--gold-amber);
-            animation: orbe-pulse 2s ease-in-out infinite;
-            image-rendering: pixelated;
-        }
-        
-        @keyframes orbe-pulse {
-            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-            50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
-        }
-        
-        /* CHAT ZONE (RIGHT) */
-        #chat-zone {
-            width: 55%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            background: linear-gradient(180deg, rgba(10, 10, 10, 0.95) 0%, rgba(20, 15, 8, 0.9) 100%);
-            border-left: 2px solid var(--brown-dark);
-        }
-        
-        #chat-history {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            scroll-behavior: smooth;
-        }
-        
-        .chat-bubble {
-            max-width: 85%;
-            padding: 15px 20px;
-            border-radius: 15px;
-            position: relative;
-            animation: bubble-appear 0.3s ease-out;
-            word-wrap: break-word;
-        }
-        
-        @keyframes bubble-appear {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .bubble-user {
-            align-self: flex-end;
-            background: linear-gradient(135deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
-            color: white;
-            border-bottom-right-radius: 5px;
-            box-shadow: 0 4px 10px rgba(0, 188, 212, 0.3);
-        }
-        
-        .bubble-assistant {
-            align-self: flex-start;
-            background: linear-gradient(135deg, var(--gold-light) 0%, var(--gold-amber) 100%);
-            color: var(--brown-dark);
-            border-bottom-left-radius: 5px;
-            box-shadow: 0 4px 10px rgba(255, 179, 0, 0.3);
-        }
-        
-        .bubble-thinking {
-            border-left: 4px solid #ff9800;
-            animation: thinking-pulse 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes thinking-pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
-        
-        /* INPUT AREA */
-        #input-area {
-            padding: 15px;
-            background: var(--bg-panel);
-            border-top: 2px solid var(--brown-dark);
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-        
-        #message-input {
-            flex: 1;
-            resize: none;
-            min-height: 44px;
-            max-height: 120px;
-            padding: 10px 15px;
-            background: var(--bg-input);
-            border: 2px solid var(--brown-light);
-            color: var(--text-light);
-            border-radius: 8px;
-            font-family: inherit;
-            font-size: 1em;
-            line-height: 1.4;
-        }
-        
-        #message-input:focus {
-            outline: none;
-            border-color: var(--gold-amber);
-            box-shadow: 0 0 10px rgba(255, 179, 0, 0.3);
-        }
-        
-        .input-controls {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        
-        .voice-btn {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            background: linear-gradient(180deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
-            border: 2px solid var(--blue-cyan);
-            color: white;
-            font-size: 1.2em;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .voice-btn.listening {
-            background: linear-gradient(180deg, #ff5252 0%, #b71c1c 100%);
-            border-color: #ff5252;
-            animation: pulse-listen 1s ease-in-out infinite;
-        }
-        
-        @keyframes pulse-listen {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7); }
-            50% { box-shadow: 0 0 0 10px rgba(255, 82, 82, 0); }
-        }
-        
-        .send-btn {
-            height: 44px;
-            padding: 0 20px;
-            border-radius: 8px;
-            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
-            border: none;
-            color: var(--brown-dark);
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .send-btn:hover {
-            transform: scale(1.05);
-        }
-        
-        .send-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        /* USAGE DOCK (BOTTOM LEFT) */
-        #usage-dock {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            background: var(--bg-panel);
-            border: 2px solid var(--gold-amber);
-            border-radius: 12px;
-            padding: 12px;
-            min-width: 280px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
-            transition: all 0.3s ease;
-            z-index: 1000;
-        }
-        
-        #usage-dock.collapsed {
-            transform: translateX(calc(-100% - 30px));
-        }
-        
-        .dock-toggle {
-            position: absolute;
-            right: -40px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 40px;
-            height: 40px;
-            background: var(--gold-amber);
-            border: none;
-            border-radius: 0 8px 8px 0;
-            color: var(--brown-dark);
-            cursor: pointer;
-            font-size: 1.2em;
-        }
-        
-        .dock-header {
-            font-size: 0.9em;
-            color: var(--gold-amber);
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .usage-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-        
-        .stat-item {
-            background: rgba(0,0,0,0.3);
-            padding: 8px;
-            border-radius: 6px;
-            font-size: 0.85em;
-        }
-        
-        .stat-label {
-            color: var(--text-dim);
-            margin-bottom: 3px;
-        }
-        
-        .stat-value {
-            color: var(--text-light);
-            font-weight: bold;
-        }
-        
-        #usage-sparkline {
-            width: 100%;
-            height: 40px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 4px;
-        }
-        
-        /* SETTINGS PANEL */
-        #settings-panel {
-            position: absolute;
-            top: 70px;
-            right: 20px;
-            background: var(--bg-panel);
-            border: 2px solid var(--gold-amber);
-            border-radius: 12px;
-            padding: 20px;
-            width: 320px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
-            display: none;
-            z-index: 1001;
-            max-height: calc(100vh - 100px);
-            overflow-y: auto;
-        }
-        
-        #settings-panel.open {
-            display: block;
-            animation: settings-slide 0.3s ease-out;
-        }
-        
-        @keyframes settings-slide {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-        
-        .settings-title {
-            font-family: 'MedievalSharp', cursive;
-            color: var(--gold-amber);
-            margin-bottom: 15px;
-            font-size: 1.3em;
-        }
-        
-        .settings-group {
-            margin-bottom: 15px;
-        }
-        
-        .settings-label {
-            display: block;
-            margin-bottom: 5px;
-            color: var(--text-dim);
-            font-size: 0.9em;
-        }
-        
-        .settings-select, .settings-input {
-            width: 100%;
-            padding: 8px 12px;
-            background: var(--bg-input);
-            border: 1px solid var(--brown-light);
-            color: var(--text-light);
-            border-radius: 6px;
-            font-family: inherit;
-        }
-        
-        .switch-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .switch {
-            position: relative;
-            width: 50px;
-            height: 26px;
-        }
-        
-        .switch input { opacity: 0; width: 0; height: 0; }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: var(--brown-dark);
-            border-radius: 26px;
-            transition: 0.3s;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 3px;
-            bottom: 3px;
-            background: white;
-            border-radius: 50%;
-            transition: 0.3s;
-        }
-        
-        input:checked + .slider { background: var(--gold-amber); }
-        input:checked + .slider:before { transform: translateX(24px); }
-        
-        /* AVATAR CONTROLS (FLOATING) */
-        #avatar-controls {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            display: flex;
-            gap: 10px;
-            background: var(--bg-panel);
-            padding: 10px;
-            border-radius: 10px;
-            border: 2px solid var(--brown-dark);
-        }
-        
-        .mode-btn {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            border: 2px solid var(--brown-light);
-            background: var(--bg-input);
-            color: var(--text-light);
-            cursor: pointer;
-            transition: all 0.3s;
-            font-size: 1.2em;
-        }
-        
-        .mode-btn.active {
-            border-color: var(--gold-amber);
-            background: rgba(255, 179, 0, 0.2);
-            box-shadow: 0 0 10px rgba(255, 179, 0, 0.4);
-        }
-        
-        </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ari — Tavern Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=MedievalSharp&family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #1a1510;
+      --bg-parchment: #f4e9d8;
+      --bg-parchment-dark: #e8dcc8;
+      --accent-user: #d4a574;
+      --accent-ai: #4a6fa5;
+      --accent-mystic: #6b8cce;
+      --accent-gold: #c9a227;
+      --accent-error: #8b2323;
+      --text-glow: 0 0 10px rgba(107, 140, 206, 0.4);
+      --shadow-card: 0 4px 20px rgba(0,0,0,0.5);
+      --shadow-glow: 0 0 20px rgba(201, 162, 39, 0.3);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Cinzel', serif;
+      background: var(--bg-primary);
+      color: #e8e8e8;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Parchment grain texture overlay */
+    #app::before {
+      content: "";
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      opacity: 0.06;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(180deg, #2a2015 0%, #1a1510 100%);
+      border-bottom: 2px solid var(--accent-gold);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+    }
+    .header h1 {
+      font-family: 'MedievalSharp', cursive;
+      font-size: 24px;
+      color: var(--accent-gold);
+      text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+    }
+    .header-controls { display: flex; gap: 10px; }
+
+    /* Buttons */
+    .btn {
+      background: linear-gradient(180deg, #5a4a3a 0%, #3a2a1a 100%);
+      border: 1px solid var(--accent-gold);
+      color: var(--accent-gold);
+      padding: 8px 16px;
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+    .btn:hover { filter: brightness(1.2); }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: linear-gradient(180deg, #7a6a5a 0%, #5a4a3a 100%); }
+    .btn-danger { border-color: var(--accent-error); color: var(--accent-error); }
+
+    /* Main layout */
+    .main-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 280px;
+      background: #15100c;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      gap: 10px;
+    }
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: radial-gradient(ellipse at center, #1f1914 0%, #1a1510 100%);
+      position: relative;
+    }
+
+    /* Chat messages */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .message {
+      max-width: 75%;
+      padding: 12px 16px;
+      border-radius: 8px;
+      position: relative;
+      word-wrap: break-word;
+      line-height: 1.5;
+      box-shadow: var(--shadow-card);
+      animation: messageIn 0.3s ease;
+    }
+    @keyframes messageIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .message-user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, var(--accent-user) 0%, #b88a60 100%);
+      color: #1a1510;
+      border: 1px solid #e8c99a;
+    }
+    .message-ai {
+      align-self: flex-start;
+      background: linear-gradient(135deg, var(--accent-ai) 0%, #3a5a80 100%);
+      color: #e8e8e8;
+      border: 1px solid var(--accent-mystic);
+    }
+    .message-ai.emotion-joy { border-color: #7cb342; }
+    .message-ai.emotion-sadness { border-color: #5c6bc0; }
+    .message-ai.emotion-anger { border-color: #e57373; }
+    .message-ai.emotion-fear { border-color: #9575cd; }
+    .message-ai.emotion-neutral { border-color: var(--accent-mystic); }
+    .message-meta {
+      font-size: 10px;
+      opacity: 0.6;
+      margin-top: 6px;
+      text-align: right;
+    }
+
+    /* Input area */
+    .input-area {
+      padding: 15px 20px;
+      background: rgba(21, 16, 12, 0.95);
+      border-top: 1px solid #333;
+      display: flex;
+      gap: 10px;
+    }
+    .input-area input[type="text"] {
+      flex: 1;
+      background: #2a2015;
+      border: 1px solid #444;
+      color: #e8e8e8;
+      padding: 12px 16px;
+      font-family: 'Cinzel', serif;
+      font-size: 14px;
+      border-radius: 4px;
+    }
+    .input-area input[type="text"]:focus {
+      outline: none;
+      border-color: var(--accent-gold);
+      box-shadow: 0 0 10px rgba(201, 162, 39, 0.2);
+    }
+
+    /* Avatar display */
+    .avatar-container {
+      width: 100%;
+      height: 200px;
+      background: #0d0a07;
+      border: 2px solid #333;
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    #three-canvas, #pixi-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .avatar-overlay {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 8px;
+      background: rgba(0,0,0,0.6);
+      font-size: 11px;
+      text-align: center;
+      color: #aaa;
+    }
+
+    /* Usage dock */
+    .usage-dock {
+      background: #1a1510;
+      border-top: 1px solid #333;
+      padding: 8px 15px;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      color: #aaa;
+    }
+    .usage-stat { display: flex; gap: 15px; }
+    .usage-stat span { color: var(--accent-gold); }
+
+    /* Settings modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--bg-parchment);
+      color: #1a1510;
+      width: 90%;
+      max-width: 600px;
+      max-height: 90vh;
+      border-radius: 8px;
+      border: 3px solid var(--accent-gold);
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-glow);
+    }
+    .modal-header {
+      background: linear-gradient(180deg, #3a2a1a 0%, #2a2015 100%);
+      color: var(--accent-gold);
+      padding: 15px 20px;
+      font-size: 18px;
+      font-family: 'MedievalSharp', cursive;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+    .modal-footer {
+      padding: 15px 20px;
+      border-top: 1px solid #444;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group.full { grid-column: 1 / -1; }
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #5a4a3a;
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      background: #fff;
+      border: 1px solid #bbb;
+      padding: 8px 10px;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      color: #1a1510;
+      border-radius: 4px;
+    }
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    /* 2FA Modal */
+    .modal .pin-dots {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    .pin-dot {
+      width: 40px; height: 40px;
+      border: 2px solid var(--accent-gold);
+      border-radius: 6px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1a1510;
+      color: var(--accent-gold);
+    }
+    .pin-dot.filled { background: var(--accent-gold); color: #1a1510; }
+    .pin-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      max-width: 250px;
+      margin: 0 auto;
+    }
+    .pin-btn {
+      padding: 15px;
+      font-size: 18px;
+      background: linear-gradient(180deg, #5a4a3a 0%, #3a2a1a 100%);
+      border: 1px solid var(--accent-gold);
+      color: var(--accent-gold);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .pin-btn:hover { filter: brightness(1.2); }
+
+    /* State indicators */
+    .status-bar {
+      padding: 5px 15px;
+      font-size: 11px;
+      color: #888;
+      display: flex;
+      justify-content: space-between;
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #666;
+    }
+    .dot.connected { background: #4caf50; box-shadow: 0 0 5px #4caf50; }
+    . dot.thinking { background: #ff9800; animation: pulse 1s infinite; }
+    .dot.speaking { background: #2196f3; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+    /* Avatar mode selector */
+    .mode-tabs {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 10px;
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 6px;
+      font-size: 11px;
+      background: #2a2015;
+      border: 1px solid #444;
+      color: #aaa;
+      text-align: center;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .mode-tab.active {
+      background: var(--accent-gold);
+      color: #1a1510;
+      border-color: var(--accent-gold);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #111; }
+    ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .main-container { flex-direction: column; }
+      .sidebar { width: 100%; height: auto; flex-direction: row; flex-wrap: wrap; }
+      .sidebar > * { flex: 1; min-width: 140px; }
+    }
+  </style>
+
+  <!-- CDN Dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r163/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.0/lib/three-vrm.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js"></script>
 </head>
 <body>
-
-<!-- MAIN APP -->
-<div id="app-container" style="display: none;">
-    <!-- HEADER -->
-    <header class="header">
-        <div class="header-controls">
-            <div class="status-indicator">
-                <div id="ws-status-dot" class="status-dot"></div>
-                <span id="ws-status-text">Déconnecté</span>
-            </div>
-        </div>
-        
-        <div class="app-title">🍻 La Taverne d'Ari</div>
-        
-        <div class="header-controls">
-            <button class="btn" style="padding: 8px 16px; font-size: 0.9em;" id="settings-btn">⚙️ Paramètres</button>
-            <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.9em;" id="logout-btn">🚪</button>
-        </div>
-    </header>
-
-    <!-- MAIN CONTENT -->
-    <div id="main-content">
-        <!-- AVATAR ZONE (LEFT) -->
-        <div id="avatar-zone">
-            <div id="avatar-container">
-                <!-- Three.js Canvas for VRM -->
-                <canvas id="three-canvas" style="display: none;"></canvas>
-                <!-- PixiJS Canvas for Live2D -->
-                <canvas id="pixi-canvas" style="display: none;"></canvas>
-                <!-- Pixel Orb -->
-                <div id="pixel-orbe" style="display: none;"></div>
-            </div>
-            
-            <!-- Audio Visualizer -->
-            <div id="audio-visualizer">
-                <div class="audio-bar"></div>
-                <div class="audio-bar"></div>
-                <div class="audio-bar"></div>
-                <div class="audio-bar"></div>
-                <div class="audio-bar"></div>
-            </div>
-        </div>
-
-        <!-- CHAT ZONE (RIGHT) -->
-        <div id="chat-zone">
-            <div id="chat-history">
-                <!-- Chat bubbles will be inserted here -->
-            </div>
-            
-            <div id="input-area">
-                <textarea id="message-input" placeholder="Parlez à Ari... (ou utilisez le micro)"></textarea>
-                <div class="input-controls">
-                    <button id="voice-btn" class="voice-btn" title="Voix">🎤</button>
-                    <button id="send-btn" class="send-btn">Envoyer</button>
-                </div>
-            </div>
-        </div>
+  <div id="app">
+    <!-- Header -->
+    <div class="header">
+      <h1>Ari</h1>
+      <div class="header-controls">
+        <button id="btn-voice" class="btn" title="Voice Input">🎤</button>
+        <button id="btn-settings" class="btn">Settings</button>
+      </div>
     </div>
 
-    <!-- USAGE DOCK -->
-    <div id="usage-dock">
-        <button class="dock-toggle" id="dock-toggle">◀</button>
-        <div class="dock-header">
-            <span>📊 Coûts & Usage</span>
-            <span id="total-cost">0.00€</span>
+    <!-- Main layout -->
+    <div class="main-container">
+      <!-- Sidebar: Avatar & Info -->
+      <div class="sidebar">
+        <div class="form-group full">
+          <label>Avatar Mode</label>
+          <div class="mode-tabs">
+            <div class="mode-tab active" data-mode="3d">3D VRM</div>
+            <div class="mode-tab" data-mode="2d">Live2D</div>
+            <div class="mode-tab" data-mode="pixel">Pixel</div>
+          </div>
         </div>
-        <div class="usage-stats">
-            <div class="stat-item">
-                <div class="stat-label">Tokens entrants</div>
-                <div class="stat-value" id="tokens-in">0</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Tokens sortants</div>
-                <div class="stat-value" id="tokens-out">0</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Coût entrée</div>
-                <div class="stat-value" id="cost-in">0.00€</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Coût sortie</div>
-                <div class="stat-value" id="cost-out">0.00€</div>
-            </div>
+        <div class="avatar-container">
+          <canvas id="three-canvas"></canvas>
+          <div id="pixi-canvas"></div>
+          <div class="avatar-overlay" id="avatar-status">Ready</div>
         </div>
-        <canvas id="usage-sparkline"></canvas>
+        <div class="form-group full">
+          <label>Current Emotion</label>
+          <div id="emotion-display" style="text-align:center; color:var(--accent-gold); font-size:13px;">neutral</div>
+        </div>
+      </div>
+
+      <!-- Chat area -->
+      <div class="chat-area">
+        <div class="status-bar">
+          <div class="status-indicator">
+            <div class="dot" id="status-dot"></div>
+            <span id="status-text">Disconnected</span>
+          </div>
+          <div id="user-display">Not logged in</div>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="input-area">
+          <input type="text" id="user-input" placeholder="Parlez à Ari..." autocomplete="off" />
+          <button id="btn-send" class="btn btn-primary">Send</button>
+        </div>
+        <div class="usage-dock">
+          <div class="usage-stat">
+            <span>Requests: <b id="usage-requests">0</b></span>
+            <span>Tokens: <b id="usage-tokens">0</b></span>
+          </div>
+          <div class="usage-stat">
+            <span id="cost-free">Free: $0.00</span>
+            <span id="cost-paid">Paid: $0.00</span>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- SETTINGS PANEL -->
-    <div id="settings-panel">
-        <h3 class="settings-title">⚙️ Paramètres d'Ari</h3>
-        
-        <div class="settings-group">
-            <label class="settings-label">Modèle LLM</label>
-            <select id="model-select" class="settings-select">
-                <option value="gpt-4">GPT-4</option>
-                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                <option value="claude-3">Claude 3</option>
-                <option value="local">Modèle Local (Llama 2)</option>
-            </select>
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <span>Ari Settings</span>
+          <button class="btn" onclick="SettingsPanel.close()">×</button>
         </div>
-        
-        <div class="settings-group">
-            <label class="settings-label">Voix TTS</label>
-            <select id="voice-select" class="settings-select">
-                <option value="female-fr">Féminine (FR)</option>
-                <option value="male-fr">Masculine (FR)</option>
-                <option value="female-en">Féminine (EN)</option>
-                <option value="male-en">Masculine (EN)</option>
-            </select>
+        <div class="modal-body" id="settings-form">
+          <!-- Populated by JS -->
         </div>
-        
-        <div class="settings-group">
-            <label class="settings-label">Mode Avatar</label>
-            <select id="avatar-mode-select" class="settings-select">
-                <option value="3d">3D (VRM)</option>
-                <option value="2d">2D (Live2D)</option>
-                <option value="pixel">Pixel (Orbe 8-bit)</option>
-            </select>
+        <div class="modal-footer">
+          <button class="btn" onclick="SettingsPanel.close()">Cancel</button>
+          <button class="btn btn-primary" onclick="SettingsPanel.save()">Save</button>
         </div>
-        
-        <div class="settings-group">
-            <label class="settings-label">Prompt Système</label>
-            <textarea id="system-prompt" class="settings-input" rows="3" style="resize: vertical;">Tu es Ari, une asistante vocale IA serviable et amicale. Tu résides dans une taverne médiévale. Sois concis et chaleureux.</textarea>
-        </div>
-        
-        <div class="settings-group switch-container">
-            <label class="settings-label">Mute Audio</label>
-            <label class="switch">
-                <input type="checkbox" id="mute-switch">
-                <span class="slider"></span>
-            </label>
-        </div>
-        
-        <div class="settings-group switch-container">
-            <label class="settings-label">Mode sombre renforcé</label>
-            <label class="switch">
-                <input type="checkbox" id="darkmode-switch" checked>
-                <span class="slider"></span>
-            </label>
-        </div>
-        
-        <button id="save-settings-btn" class="btn" style="width: 100%; margin-top: 10px;">💾 Sauvegarder</button>
+      </div>
     </div>
 
-    <!-- AVATAR CONTROLS -->
-    <div id="avatar-controls">
-        <button class="mode-btn active" data-mode="3d" title="Mode 3D">🎭</button>
-        <button class="mode-btn" data-mode="2d" title="Mode 2D">🎨</button>
-        <button class="mode-btn" data-mode="pixel" title="Mode Pixel">👾</button>
+    <!-- 2FA Modal -->
+    <div class="modal-overlay" id="auth-modal">
+      <div class="modal" style="max-width: 400px;">
+        <div class="modal-header">
+          <span>Authentication Required</span>
+        </div>
+        <div class="modal-body" style="text-align:center;">
+          <p id="auth-message">Enter the 4-digit code displayed on the server console.</p>
+          <div class="pin-dots">
+            <div class="pin-dot" id="pin-1">•</div>
+            <div class="pin-dot" id="pin-2">•</div>
+            <div class="pin-dot" id="pin-3">•</div>
+            <div class="pin-dot" id="pin-4">•</div>
+          </div>
+          <div class="pin-buttons" id="pin-keypad"></div>
+          <button class="btn btn-danger" id="auth-cancel" style="margin-top:10px;">Cancel (Local Mode)</button>
+        </div>
+      </div>
     </div>
-</div>
+  </div>
 
-<!-- CDN LIBRARIES -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r163/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.163.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.163.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.0/lib/three-vrm.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js"></script>
+  <script>
+    // ============================================
+    // CONFIGURATION
+    // ============================================
+    const CONFIG = {
+      WS_URL: `ws://${location.host}/ws`,
+      RECONNECT_DELAY_MS: 2000,
+      AUDIO_MAX_QUEUE: 20,
+      STORAGE_KEYS: {
+        USERS: "assistant_users_v3",
+        ACTIVE_USER: "assistant_active_user_v1",
+        PROFILES: (userId) => `assistant_profiles_v2_${userId}`,
+        UI_CONFIG: (userId) => `assistant_ui_config_v2_${userId}`,
+      },
+      DEFAULT_CONFIG: {
+        ai_name: "Ari",
+        model: "google/gemma-3-27b-it:free",
+        system_prompt: "Tu es Ari, une assistante IA francophone vivant dans une taverne médiévale fantastique. Tu es chaleureuse, un peu espiègle, et tu connais tous les ragots du coin. Parle avec naturel, comme une vraie personne. Utilise un français courant, évite le langage trop formel.",
+        edge_voice: "fr-FR-DeniseNeural",
+        edge_rate: "+25%",
+        edge_pitch: "+0Hz",
+        edge_volume: "+0%",
+        tts_engine: "edge",
+        temperature: 0.7,
+        max_tokens: 1024,
+        internet_enabled: true,
+        avatar_config: { model: "", emotion: "neutral", mode: "3d" },
+      }
+    };
 
-<script>
-/**
- * ARI - FRONTEND SPA COMPLET
- * Style Taverne RPG
- */
+    // Utility functions
+    const uuid = () => crypto.randomUUID?.() || 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
 
-// ── UTILITAIRES ─────────────────────────────────────────────────────────────
-const Utils = {
-    generateId: () => Math.random().toString(36).substr(2, 9),
-    
-    hash256: async (msg) => {
-        // Try Web Crypto API first (fast, native)
-        if (typeof window.crypto !== 'undefined' || typeof self.crypto !== 'undefined') {\n        const cryptoObj = window.crypto || self.crypto;\n        if (cryptoObj.subtle && cryptoObj.subtle.digest) {
-            try {
-                const msgBuffer = new TextEncoder().encode(msg);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-                return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-            } catch (e) {
-                console.warn('crypto.subtle failed, falling back:', e);
-            }
-        }
-        // Fallback: simple async SHA-256 using built-in SubtleCrypto or a simple hash if available
-        // More robust: use a small pure JS implementation if Web Crypto not available
-        if (cryptoObj && cryptoObj.getRandomValues) {
-            // Minimal: use a simple iterative hash (not cryptographically strong but acceptable for PIN auth)
-            const str = msg + '';  
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                const char = str.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32-bit
-            }
-            // Convert to hex string (64 chars like SHA-256)
-            let hex = Math.abs(hash).toString(16);
-            while (hex.length < 64) hex = '0' + hex;
-            return hex.slice(0, 64);
-        }
-        // Last resort: use a simple hash
-        let simple = 0;
-        for (let i = 0; i < msg.length; i++) simple = (simple * 31 + msg.charCodeAt(i)) | 0;
-        return '0'.repeat(64 - simple.toString(16).length) + Math.abs(simple).toString(16);
-    },
-    
-    saveToLocal: (key, data) => localStorage.setItem(key, JSON.stringify(data)),
-    loadFromLocal: (key) => {
-        const d = localStorage.getItem(key);
-        return d ? JSON.parse(d) : null;
-    },
-    
-    formatCost: (cents) => (cents / 100).toFixed(2) + '€',
-    
-    // Sparkline canvas
-    drawSparkline: (canvas, values, color = '#ffb300') => {
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width = canvas.offsetWidth * 2;
-        const h = canvas.height = canvas.offsetHeight * 2;
-        ctx.clearRect(0,0,w,h);
-        if (!values || values.length < 2) return;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        const max = Math.max(...values) || 1;
-        const step = w / (values.length - 1);
-        values.forEach((v,i) => {
-            const x = i * step;
-            const y = h - (v / max) * (h * 0.8) - (h * 0.1);
-            i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
-        });
-        ctx.stroke();
-    }
-};
+    const isoTime = () => new Date().toISOString();
 
-// ── AUTH MANAGER ────────────────────────────────────────────────────────────
+    // Storage helpers
+    const Storage = {
+      get(key, defaultVal) {
+        try {
+          const v = localStorage.getItem(key);
+          return v ? JSON.parse(v) : defaultVal;
+        } catch (e) { return defaultVal; }
+      },
+      set(key, val) {
+        try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+      },
+      remove(key) { localStorage.removeItem(key); }
+    };
 
-// ── WEBSOCKET MANAGER ───────────────────────────────────────────────────────
-class WsManager {
-    constructor(wsUrl) {
-        this.wsUrl = wsUrl;
+    // ============================================
+    // WEBSOCKET MANAGER
+    // ============================================
+    class WsManager {
+      constructor() {
         this.ws = null;
-        this.heartbeat = null;
-        this.retryCount = 0;
-        this.maxRetries = 5;
-        this.baseDelay = 1000;
-        this.onMessage = null;
-        this.onStatusChange = null;
-        this.config = {};
-    }
-    
-    connect() {
+        this.url = CONFIG.WS_URL;
+        this.handlers = new Map();
+        this.reconnectTimeout = null;
+        this.clientId = uuid();
+        this.messageQueue = [];
+      }
+
+      connect() {
         if (this.ws?.readyState === WebSocket.OPEN) return;
-        
-        this.updateStatus('connecting');
-        this.ws = new WebSocket(this.wsUrl);
-        
-        this.ws.onopen = () => {
-            console.log('WebSocket connecté');
-            this.retryCount = 0;
-            this.updateStatus('connected');
-            this.startHeartbeat();
-            // Restore config
-            if (Object.keys(this.config).length) {
-                this.send({ type: 'set_config', config: this.config });
-            }
-        };
-        
-        this.ws.onclose = (e) => {
-            console.log('WebSocket fermé:', e.code, e.reason);
-            this.updateStatus('disconnected');
-            this.stopHeartbeat();
-            this.retry();
-        };
-        
-        this.ws.onerror = (e) => {
-            console.error('WebSocket erreur:', e);
-        };
-        
-        this.ws.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            this.onMessage && this.onMessage(data);
-        };
-    }
-    
-    retry() {
-        if (this.retryCount >= this.maxRetries) return;
-        const delay = this.baseDelay * Math.pow(2, this.retryCount);
-        setTimeout(() => {
-            this.retryCount++;
-            this.connect();
-        }, delay);
-    }
-    
-    startHeartbeat() {
-        this.stopHeartbeat();
-        this.heartbeat = setInterval(() => {
-            if (this.ws?.readyState === WebSocket.OPEN) {
-                this.send({ type: 'ping' });
-            }
-        }, 30000);
-    }
-    
-    stopHeartbeat() {
-        if (this.heartbeat) clearInterval(this.heartbeat);
-    }
-    
-    send(data) {
+        console.log("[WS] Connecting to", this.url);
+        this.ws = new WebSocket(this.url);
+        this.ws.onopen = () => this._onOpen();
+        this.ws.onclose = (e) => this._onClose(e);
+        this.ws.onerror = (e) => this._onError(e);
+        this.ws.onmessage = (e) => this._onMessage(e);
+      }
+
+      _onOpen() {
+        console.log("[WS] Connected");
+        this.reconnectTimeout && clearTimeout(this.reconnectTimeout);
+        WsManager.emit("connected");
+        // Flush queued messages
+        while (this.messageQueue.length) {
+          const msg = this.messageQueue.shift();
+          this._sendRaw(msg);
+        }
+      }
+
+      _onClose(e) {
+        console.log("[WS] Closed", e.code, e.reason);
+        WsManager.emit("disconnected", e);
+        this._scheduleReconnect();
+      }
+
+      _onError(e) {
+        console.error("[WS] Error", e);
+      }
+
+      _scheduleReconnect() {
+        if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = setTimeout(() => {
+          console.log("[WS] Reconnecting...");
+          this.connect();
+        }, CONFIG.RECONNECT_DELAY_MS);
+      }
+
+      _onMessage(e) {
+        let data;
+        try { data = JSON.parse(e.data); } catch (err) { return; }
+        const handler = this.handlers.get(data.type);
+        if (handler) handler(data);
+        WsManager.emit("message", data);
+      }
+
+      _sendRaw(obj) {
         if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(data));
+          this.ws.send(JSON.stringify(obj));
+        } else {
+          this.messageQueue.push(obj);
         }
-    }
+      }
 
-    sendToLLM(text) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.error('WebSocket not open');
-            return;
+      send(type, payload = {}) {
+        this._sendRaw({ type, ...payload });
+      }
+
+      on(type, fn) {
+        if (!this.handlers.has(type)) this.handlers.set(type, []);
+        this.handlers.get(type).push(fn);
+      }
+
+      off(type, fn) {
+        const arr = this.handlers.get(type);
+        if (arr) {
+          const i = arr.indexOf(fn);
+          if (i >= 0) arr.splice(i, 1);
         }
-        this.send({
-            type: 'user_text',
-            data: {
-                text: text,
-                profile: 'default'
-                // user_id taken from session on server side
-            }
-        });
-    }    
-    updateStatus(status) {
-        this.onStatusChange && this.onStatusChange(status);
-    }
-    
-    close() {
-        this.stopHeartbeat();
+      }
+
+      static emit(event, data) {
+        window.dispatchEvent(new CustomEvent("wsmanager:" + event, { detail: data }));
+      }
+
+      close() {
+        this.reconnectTimeout && clearTimeout(this.reconnectTimeout);
         this.ws?.close();
+      }
     }
-}
 
-// ── AUDIO QUEUE ─────────────────────────────────────────────────────────────
-class AudioQueue {
-    constructor() {
+    // ============================================
+    // AUDIO QUEUE (TTS Playback)
+    // ============================================
+    class AudioQueue {
+      constructor() {
         this.queue = [];
-        this.ctx = null;
+        this.current = null;
         this.playing = false;
-        this.muted = false;
-        this.onStart = null;
-        this.onEnd = null;
-    }
-    
-    init() {
-        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    
-    enqueue(base64Audio) {
-        this.queue.push(base64Audio);
-        this.playNext();
-    }
-    
-    async playNext() {
-        if (this.playing || this.queue.length === 0 || this.muted) return;
-        
-        this.init();
-        if (this.ctx.state === 'suspended') await this.ctx.resume();
-        
+      }
+
+      enqueue(base64data) {
+        this.queue.push(base64data);
+        if (!this.playing) this._playNext();
+      }
+
+      clear() {
+        if (this.current) {
+          this.current.pause();
+          this.current = null;
+        }
+        this.queue = [];
+        this.playing = false;
+      }
+
+      _playNext() {
+        if (this.queue.length === 0) {
+          this.playing = false;
+          return;
+        }
         this.playing = true;
-        this.onStart && this.onStart();
-        
-        const base64 = this.queue.shift();
-        const audioData = base64.replace(/^data:audio\/(\w+);base64,/, '');
-        const binary = atob(audioData);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const audioBuffer = await this.ctx.decodeAudioData(bytes.buffer);
-        
-        const source = this.ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(this.ctx.destination);
-        
-        source.start();
-        source.onended = () => {
-            this.playing = false;
-            this.onEnd && this.onEnd();
-            this.playNext();
+        const data = this.queue.shift();
+        const audio = new Audio("data:audio/wav;base64," + data);
+        this.current = audio;
+        audio.onended = () => {
+          this.current = null;
+          this._playNext();
         };
+        audio.onerror = () => {
+          console.warn("[Audio] playback error, skipping");
+          this.current = null;
+          this._playNext();
+        };
+        audio.play().catch(err => {
+          console.warn("[Audio] play failed:", err);
+          this.current = null;
+          this._playNext();
+        });
+      }
     }
-    
-    clear() {
-        this.queue = [];
-        this.playing = false;
-    }
-    
-    setMuted(m) {
-        this.muted = m;
-        if (m && this.ctx) this.ctx.suspend();
-        else if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
-    }
-}
 
-// ── CHAT MANAGER ────────────────────────────────────────────────────────────
-class ChatManager {
-    constructor() {
-        this.history = [];
-        this.bubbles = [];
-        this.currentStream = null;
-        this.currentToken = '';
-        this.placeholderText = "Bienvenue dans la taverne d'Ari ! Comment puis-je vous aider ?";
-        this.onNewMessage = null;
-    }
-    
-    addUserMessage(text) {
-        this.history.push({ role: 'user', content: text });
-        this.renderBubble('user', text);
-        return text;
-    }
-    
-    startAssistantResponse() {
-        // Remove previous "thinking" bubble if exists
-        this.clearThinkingBubble();
-        
-        // Create new empty bubble
-        const bubble = this.renderBubble('assistant', '', true);
-        this.currentStream = { bubble, content: '' };
-        return bubble;
-    }
-    
-    appendToken(token) {
-        if (!this.currentStream) return;
-        // Filter potential prompt leaks
-        if (token.includes('<think>') || token.includes('</think>')) return;
-        this.currentStream.content += token;
-        this.updateBubble(this.currentStream.bubble, this.currentStream.content);
-    }
-    
-    finishStream() {
-        if (this.currentStream) {
-            this.history.push({ role: 'assistant', content: this.currentStream.content });
-            this.currentStream = null;
-            this.currentToken = '';
-        }
-    }
-    
-    stopGeneration() {
-        if (this.currentStream) {
-            this.history.push({ role: 'assistant', content: this.currentStream.content + ' [arrêté]' });
-            this.currentStream = null;
-        }
-    }
-    
-    renderBubble(role, text, isThinking = false) {
-        const history = document.getElementById('chat-history');
-        const bubble = document.createElement('div');
-        bubble.className = `chat-bubble bubble-${role}${isThinking ? ' bubble-thinking' : ''}`;
-        bubble.innerHTML = text || (isThinking ? 'Ari réfléchit...' : '');
-        history.appendChild(bubble);
-        history.scrollTop = history.scrollHeight;
-        this.bubbles.push(bubble);
-        return bubble;
-    }
-    
-    updateBubble(bubble, text) {
-        bubble.innerHTML = text;
-        const history = document.getElementById('chat-history');
-        history.scrollTop = history.scrollHeight;
-    }
-    
-    clearThinkingBubble() {
-        const bubbles = document.querySelectorAll('.bubble-thinking');
-        bubbles.forEach(b => b.remove());
-    }
-    
-    clear() {
-        this.history = [];
-        const history = document.getElementById('chat-history');
-        history.innerHTML = '';
-    }
-}
+    // ============================================
+    // AUTH MANAGER (2FA Remote)
+    // ============================================
+    class AuthManager {
+      constructor() {
+        this.currentUser = null;
+        this.profiles = [];
+        this.authenticated = false;
+        this._2faPending = null;
+        this.users = Storage.get(CONFIG.STORAGE_KEYS.USERS, []);
+      }
 
-// ── AVATAR MANAGER ──────────────────────────────────────────────────────────
-class AvatarManager {
-    constructor() {
-        this.mode = '3d'; // 3d, 2d, pixel
-        this.scene = null;
-        this.camera = null;
-        this.renderer = null;
+      isLoggedIn() {
+        // Localhost or loopback connections bypass 2FA
+        const isLocal = /^127\.0\.0\.1$|^::1$|^localhost$/.test(location.hostname);
+        return isLocal || this.authenticated;
+      }
+
+      request2FA(userId) {
+        return new Promise((resolve, reject) => {
+          WsManager.send("auth_2fa_begin", { user_id: userId });
+          const handler = (msg) => {
+            if (msg.type === "2fa_challenge" && msg.data.user_id === userId) {
+              this._2faPending = { userId, handler };
+              resolve(msg.data);
+            }
+          };
+          WsManager.on("message", handler);
+          setTimeout(() => {
+            WsManager.off("message", handler);
+            reject(new Error("2FA request timeout"));
+          }, 15000);
+        });
+      }
+
+      verify2FA(code) {
+        return new Promise((resolve, reject) => {
+          if (!this._2faPending) return reject(new Error("No pending 2FA"));
+          WsManager.send("auth_2fa_verify", {
+            user_id: this._2faPending.userId,
+            code: parseInt(code, 10)
+          });
+          const handler = (msg) => {
+            if (msg.type === "2fa_result") {
+              if (msg.success) {
+                this.authenticated = true;
+                this.currentUser = this._2faPending.userId;
+                // Save as trusted device
+                Storage.set(CONFIG.STORAGE_KEYS.ACTIVE_USER, this.currentUser);
+                resolve(true);
+              } else {
+                reject(new Error(msg.error || "Invalid code"));
+              }
+              this._2faPending = null;
+              WsManager.off("message", handler);
+            }
+          };
+          WsManager.on("message", handler);
+        });
+      }
+
+      cancel2FA() {
+        this._2faPending = null;
+      }
+
+      autoLoginIfTrusted() {
+        const saved = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_USER, null);
+        if (saved) {
+          // For localhost, auto-login; remote will trigger 2FA later
+          if (/^127\.0\.0\.1$|^::1$|^localhost$/.test(location.hostname)) {
+            this.currentUser = saved;
+            this.authenticated = true;
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+
+    // ============================================
+    // CHAT MANAGER
+    // ============================================
+    class ChatManager {
+      constructor() {
+        this.container = document.getElementById("chat-messages");
+        this.currentAiBubble = null;
+        this.pendingChunks = "";
+      }
+
+      addUserBubble(text) {
+        const div = document.createElement("div");
+        div.className = "message message-user";
+        div.innerHTML = this._escapeHtml(text) + `<div class="message-meta">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
+        this.container.appendChild(div);
+        this._scrollToBottom();
+      }
+
+      appendAiChunk(token, isReasoning = false) {
+        if (!this.currentAiBubble) {
+          this.currentAiBubble = document.createElement("div");
+          this.currentAiBubble.className = "message message-ai";
+          this.currentAiBubble.innerHTML = `<div class="ai-text"></div>`;
+          this.container.appendChild(this.currentAiBubble);
+        }
+        const textEl = this.currentAiBubble.querySelector(".ai-text");
+        this.pendingChunks += token;
+        textEl.innerHTML = this._escapeHtml(this.pendingChunks);
+        this._scrollToBottom();
+      }
+
+      finalizeAiBubble(emotion = "neutral") {
+        if (this.currentAiBubble) {
+          const textEl = this.currentAiBubble.querySelector(".ai-text");
+          textEl.innerHTML = this._escapeHtml(this.pendingChunks);
+          this.currentAiBubble.classList.add(`emotion-${emotion}`);
+          this.currentAiBubble.innerHTML += `<div class="message-meta">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} • ${emotion}</div>`;
+          this.currentAiBubble = null;
+          this.pendingChunks = "";
+        }
+        this._scrollToBottom();
+      }
+
+      addInfo(text, type = "info") {
+        const div = document.createElement("div");
+        div.className = "message";
+        div.style.cssText = "align-self:center; background:rgba(0,0,0,0.3); color:#aaa; font-size:12px; padding:6px 12px;";
+        div.textContent = text;
+        this.container.appendChild(div);
+        this._scrollToBottom();
+      }
+
+      clear() {
+        this.container.innerHTML = "";
+      }
+
+      _scrollToBottom() {
+        this.container.scrollTop = this.container.scrollHeight;
+      }
+
+      _escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>"']/g, m => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[m]));
+      }
+    }
+
+    // ============================================
+    // AVATAR MANAGER (Three.js VRM + Live2D + Pixi)
+    // ============================================
+    class AvatarManager {
+      constructor() {
+        this.mode = "3d";
         this.vrm = null;
         this.pixiApp = null;
         this.live2dModel = null;
-        this.animationId = null;
-        this.onSpeaking = null;
-        this.isSpeaking = false;
-    }
-    
-    init() {
-        this.setMode(this.mode);
-    }
-    
-    setMode(mode) {
+        this.currentEmotion = "neutral";
+        this.mixer = null;
+        this.mouthOpen = 0;
+        this.audioAnalyser = null;
+        this.threeCanvas = document.getElementById("three-canvas");
+        this.pixiContainer = document.getElementById("pixi-canvas");
+        this.statusEl = document.getElementById("avatar-status");
+      }
+
+      setMode(mode) {
         this.mode = mode;
-        this.cleanupCurrent();
-        const container = document.getElementById('avatar-container');
-        
-        // Hide all
-        document.getElementById('three-canvas').style.display = 'none';
-        document.getElementById('pixi-canvas').style.display = 'none';
-        document.getElementById('pixel-orbe').style.display = 'none';
-        
-        switch(mode) {
-            case '3d':
-                this.init3D(container);
-                break;
-            case '2d':
-                this.init2D(container);
-                break;
-            case 'pixel':
-                this.initPixel(container);
-                break;
-        }
-        
-        // Update buttons
-        document.querySelectorAll('.mode-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === mode);
-        });
-    }
-    
-    init3D(container) {
-        const canvas = document.getElementById('three-canvas');
-        canvas.style.display = 'block';
-        
-        // Scene setup
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 0.1, 1000);
-        this.camera.position.set(0, 1.2, 2.5);
-        
-        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-        this.renderer.setSize(container.clientWidth, container.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        
-        // Lights
-        const light = new THREE.DirectionalLight(0xffffff, 1.5);
-        light.position.set(1, 2, 2);
-        this.scene.add(light);
-        this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        
-        // Load VRM (simplified - would load from /api/library)
-        this.loadVRM();
-        
-        // Orbit controls
-        const controls = new THREE.OrbitControls(this.camera, canvas);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.minDistance = 1;
-        controls.maxDistance = 5;
-        controls.target.set(0, 1, 0);
-        
-        // Animate
-        this.animate3D();
-    }
-    
-    loadVRM() {
-        // Simplified: create placeholder geometry
-        const geometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
-        const material = new THREE.MeshStandardMaterial({ color: 0xffb300 });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(0, 1, 0);
-        this.scene.add(mesh);
-        
-        // Would normally load: new THREE.VRMLoader().load('/api/library/avatar.vrm', vrm => {...})
-    }
-    
-    animate3D() {
-        if (this.mode !== '3d') return;
-        this.animationId = requestAnimationFrame(() => this.animate3D());
-        // Update controls, animations, etc.
-    }
-    
-    init2D(container) {
-        const canvas = document.getElementById('pixi-canvas');
-        canvas.style.display = 'block';
-        
-        this.pixiApp = new PIXI.Application();
-        this.pixiApp.init({ 
-            canvas, 
-            width: container.clientWidth, 
-            height: container.clientHeight,
-            backgroundAlpha: 0,
-            resizeTo: container
-        });
-        
-        // Load Live2D model (placeholder)
-        // Would load: PIXI.live2d.Live2DModel.from('/api/library/model.moc3')
-        this.live2dModel = new PIXI.Graphics();
-        this.live2dModel.x = container.clientWidth / 2;
-        this.live2dModel.y = container.clientHeight / 2;
-        this.pixiApp.stage.addChild(this.live2dModel);
-        
-        // Simple placeholder animation
-        this.animate2D();
-    }
-    
-    animate2D() {
-        if (this.mode !== '2d' || !this.pixiApp) return;
-        this.animationId = requestAnimationFrame(() => this.animate2D());
-        // Update model via interaction manager, etc.
-    }
-    
-    initPixel(container) {
-        const orbe = document.getElementById('pixel-orbe');
-        orbe.style.display = 'block';
-        // CSS animation handles it
-    }
-    
-    cleanupCurrent() {
-        if (this.animationId) cancelAnimationFrame(this.animationId);
-        if (this.renderer) this.renderer.dispose();
-        if (this.pixiApp) this.pixiApp.destroy(true);
-    }
-    
-    setSpeaking(speaking) {
-        if (this.isSpeaking === speaking) return;
-        this.isSpeaking = speaking;
-        this.onSpeaking && this.onSpeaking(speaking);
-        
-        // Visual feedback based on mode
-        if (speaking) {
-            // Glow effect
-            const canvas = document.getElementById('three-canvas');
-            if (canvas) canvas.style.filter = 'drop-shadow(0 0 20px #ffb300)';
-        } else {
-            const canvas = document.getElementById('three-canvas');
-            if (canvas) canvas.style.filter = 'none';
-        }
-    }
-}
+        this._switchRenderer();
+      }
 
-// ── VOICE INPUT ─────────────────────────────────────────────────────────────
-class VoiceInput {
-    constructor() {
-        this.recognition = null;
-        this.isListening = false;
-        this.onResult = null;
-        this.onError = null;
-        this.lang = 'fr-FR';
-        
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            this.recognition = new SpeechRecognition();
-            this.recognition.lang = this.lang;
-            this.recognition.continuous = false;
-            this.recognition.interimResults = false;
-            
-            this.recognition.onresult = (e) => {
-                const transcript = e.results[0][0].transcript;
-                this.stop();
-                this.onResult && this.onResult(transcript);
-            };
-            
-            this.recognition.onerror = (e) => {
-                console.error('Speech error:', e);
-                this.stop();
-                this.onError && this.onError(e);
-            };
-            
-            this.recognition.onend = () => {
-                if (this.isListening) {
-                    // Restart if still supposed to be listening
-                    try { this.start(); } catch (e) {}
-                } else {
-                    this.updateUI(false);
-                }
-            };
-        }
-    }
-    
-    start() {
-        if (!this.recognition) {
-            alert('Reconnaissance vocale non supportée par ce navigateur');
-            return;
-        }
+      async loadVRM(url) {
         try {
-            this.recognition.start();
-            this.isListening = true;
-            this.updateUI(true);
+          this.statusEl.textContent = "Loading VRM...";
+          const loader = new THREE.VRMLoader();
+          loader.load(url, (vrm) => {
+            this.vrm = vrm;
+            this._setupThreeScene();
+            this.statusEl.textContent = "VRM Loaded";
+            this._animate();
+          });
         } catch (e) {
-            console.error(e);
+          console.error("[Avatar] VRM load error:", e);
+          this.statusEl.textContent = "VRM Error";
         }
-    }
-    
-    stop() {
-        if (this.recognition && this.isListening) {
-            this.recognition.stop();
-            this.isListening = false;
-            this.updateUI(false);
-        }
-    }
-    
-    updateUI(listening) {
-        const btn = document.getElementById('voice-btn');
-        btn.classList.toggle('listening', listening);
-        btn.innerHTML = listening ? '⏹️' : '🎤';
-    }
-}
+      }
 
-// ── USAGE DOCK ──────────────────────────────────────────────────────────────
-class UsageDock {
-    constructor() {
-        this.tokensIn = 0;
-        this.tokensOut = 0;
-        this.costInCents = 0;
-        this.costOutCents = 0;
-        this.sparkValues = [];
-        this.maxSparkPoints = 20;
-        this.canvas = document.getElementById('usage-sparkline');
-        this.collapsed = false;
-    }
-    
-    updateStats() {
-        document.getElementById('tokens-in').textContent = this.tokensIn;
-        document.getElementById('tokens-out').textContent = this.tokensOut;
-        document.getElementById('cost-in').textContent = Utils.formatCost(this.costInCents);
-        document.getElementById('cost-out').textContent = Utils.formatCost(this.costOutCents);
-        document.getElementById('total-cost').textContent = Utils.formatCost(this.costInCents + this.costOutCents);
-        
-        // Update sparkline
-        this.sparkValues.push(this.tokensOut);
-        if (this.sparkValues.length > this.maxSparkPoints) this.sparkValues.shift();
-        Utils.drawSparkline(this.canvas, this.sparkValues);
-    }
-    
-    addUsage(type, tokens, costPerTokenCents = 1) {
-        const cost = Math.round(tokens * costPerTokenCents);
-        if (type === 'in') {
-            this.tokensIn += tokens;
-            this.costInCents += cost;
-        } else {
-            this.tokensOut += tokens;
-            this.costOutCents += cost;
-        }
-        this.updateStats();
-    }
-    
-    reset() {
-        this.tokensIn = 0;
-        this.tokensOut = 0;
-        this.costInCents = 0;
-        this.costOutCents = 0;
-        this.sparkValues = [];
-        this.updateStats();
-    }
-}
+      _setupThreeScene() {
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(30, this.threeCanvas.clientWidth / this.threeCanvas.clientHeight, 0.1, 100.0);
+        camera.position.set(0, 1.4, 2.5);
+        const renderer = new THREE.WebGLRenderer({ canvas: this.threeCanvas, antialias: true, alpha: true });
+        renderer.setSize(this.threeCanvas.clientWidth, this.threeCanvas.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        // Lighting
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(1, 1, 1);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xcccccc, 0.4));
+        // VRM
+        scene.add(this.vrm.scene);
+        this.vrm.scene.rotation.y = Math.PI;
+        this.threeScene = scene;
+        this.threeCamera = camera;
+        this.threeRenderer = renderer;
+        // Resize handler
+        window.addEventListener("resize", () => {
+          this.threeCamera.aspect = this.threeCanvas.clientWidth / this.threeCanvas.clientHeight;
+          this.threeCamera.updateProjectionMatrix();
+          this.threeRenderer.setSize(this.threeCanvas.clientWidth, this.threeCanvas.clientHeight);
+        });
+      }
 
-// ── SETTINGS PANEL ──────────────────────────────────────────────────────────
-class SettingsPanel {
-    constructor() {
-        this.panel = document.getElementById('settings-panel');
-        this.isOpen = false;
-        this.currentSettings = {
-            model: 'gpt-4',
-            voice: 'female-fr',
-            avatarMode: '3d',
-            systemPrompt: '',
-            muted: false,
-            darkMode: true
+      _animate() {
+        if (!this.vrm || this.mode !== "3d") return;
+        this.vrm.update(window.clock?.getDelta?.() || 0.016);
+        // Lip sync via morph target
+        if (this.vrm.expressionManager && this.mouthOpen > 0) {
+          try {
+            this.vrm.expressionManager.setValue("a", this.mouthOpen);
+          } catch (e) {}
+        }
+        // Emotion via blend shapes (simple preset mapping)
+        this._applyEmotionBlend();
+        this.threeRenderer.render(this.threeScene, this.threeCamera);
+        requestAnimationFrame(() => this._animate());
+      }
+
+      _applyEmotionBlend() {
+        if (!this.vrm?.expressionManager) return;
+        const em = this.currentEmotion;
+        // Clear all
+        ["a","i","u","e","o","blink","angry","sad","relaxed","surprised","neutral"].forEach(exp => {
+          try { this.vrm.expressionManager.setValue(exp, 0); } catch(e) {}
+        });
+        switch (em) {
+          case "joy": this.vrm.expressionManager.setValue("relaxed", 1); break;
+          case "sadness": this.vrm.expressionManager.setValue("sad", 1); break;
+          case "anger": this.vrm.expressionManager.setValue("angry", 1); break;
+          case "fear": this.vrm.expressionManager.setValue("surprised", 0.7); break;
+          default: this.vrm.expressionManager.setValue("neutral", 1);
+        }
+      }
+
+      async loadLive2D(url) {
+        try {
+          this.statusEl.textContent = "Loading Live2D...";
+          if (!this.pixiApp) {
+            this.pixiApp = new PIXI.Application({
+              view: this.pixiContainer,
+              resizeTo: this.pixiContainer,
+              backgroundAlpha: 0,
+              antialias: true
+            });
+          }
+          this.live2dModel = await PIXI.live2d.Live2DModel.from(url);
+          this.pixiApp.stage.addChild(this.live2dModel);
+          this._fitLive2D();
+          this.statusEl.textContent = "Live2D Loaded";
+        } catch (e) {
+          console.error("[Avatar] Live2D error:", e);
+          this.statusEl.textContent = "Live2D Error";
+        }
+      }
+
+      _fitLive2D() {
+        if (!this.live2dModel) return;
+        const w = this.pixiContainer.clientWidth;
+        const h = this.pixiContainer.clientHeight;
+        this.live2dModel.scale.set(Math.min(w / this.live2dModel.width, h / this.live2dModel.height) * 0.8);
+      }
+
+      setEmotion(emotion) {
+        this.currentEmotion = emotion;
+        if (this.live2dModel) {
+          const exprMap = {
+            "joy": "f03",    // common Live2D expression IDs (may vary)
+            "sadness": "f01",
+            "anger": "f02",
+            "fear": "f04",
+            "neutral": "f00"
+          };
+          const expId = exprMap[emotion] || "f00";
+          try { this.live2dModel.motion(expId); } catch(e) {}
+        }
+        document.getElementById("emotion-display").textContent = emotion;
+      }
+
+      startLipSync(mediaElement) {
+        if (!mediaElement) return;
+        const ctx = new AudioContext();
+        const src = ctx.createMediaElementSource(mediaElement);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        src.connect(analyser);
+        analyser.connect(ctx.destination);
+        this.audioAnalyser = analyser;
+        this._lipSyncLoop();
+      }
+
+      _lipSyncLoop() {
+        if (!this.audioAnalyser || this.mode !== "2d") return;
+        const data = new Uint8Array(this.audioAnalyser.frequencyBinCount);
+        this.audioAnalyser.getByteFrequencyData(data);
+        const avg = data.reduce((a,b)=>a+b,0) / data.length;
+        this.mouthOpen = Math.min(avg / 128, 1);
+        requestAnimationFrame(() => this._lipSyncLoop());
+      }
+
+      _switchRenderer() {
+        this.threeCanvas.style.display = this.mode === "3d" ? "block" : "none";
+        this.pixiContainer.style.display = this.mode === "2d" ? "block" : "none";
+      }
+    }
+
+    // ============================================
+    // VOICE INPUT
+    // ============================================
+    class VoiceInput {
+      constructor(onResult) {
+        this.onResult = onResult;
+        this.recognition = null;
+        this.listening = false;
+        this._init();
+      }
+
+      _init() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          console.warn("[VoiceInput] Not supported");
+          return;
+        }
+        this.recognition = new SpeechRecognition();
+        this.recognition.continuous = false;
+        this.recognition.lang = "fr-FR";
+        this.recognition.interimResults = false;
+        this.recognition.onresult = (e) => {
+          const text = e.results[0][0].transcript;
+          this.onResult(text);
         };
-    }
-    
-    bindEvents(onSave) {
-        document.getElementById('settings-btn').onclick = () => this.toggle();
-        document.getElementById('save-settings-btn').onclick = () => {
-            this.collect();
-            onSave && onSave(this.currentSettings);
-            this.close();
+        this.recognition.onerror = (e) => {
+          console.error("[VoiceInput] Error:", e.error);
+          this.listening = false;
         };
-    }
-    
-    toggle() {
-        this.isOpen ? this.close() : this.open();
-    }
-    
-    open() {
-        this.panel.classList.add('open');
-        this.isOpen = true;
-    }
-    
-    close() {
-        this.panel.classList.remove('open');
-        this.isOpen = false;
-    }
-    
-    collect() {
-        this.currentSettings.model = document.getElementById('model-select').value;
-        this.currentSettings.voice = document.getElementById('voice-select').value;
-        this.currentSettings.avatarMode = document.getElementById('avatar-mode-select').value;
-        this.currentSettings.systemPrompt = document.getElementById('system-prompt').value;
-        this.currentSettings.muted = document.getElementById('mute-switch').checked;
-        this.currentSettings.darkMode = document.getElementById('darkmode-switch').checked;
-    }
-    
-    apply(settings) {
-        Object.assign(this.currentSettings, settings);
-        document.getElementById('model-select').value = settings.model;
-        document.getElementById('voice-select').value = settings.voice;
-        document.getElementById('avatar-mode-select').value = settings.avatarMode;
-        document.getElementById('system-prompt').value = settings.systemPrompt;
-        document.getElementById('mute-switch').checked = settings.muted;
-        document.getElementById('darkmode-switch').checked = settings.darkMode;
-    }
-}
+        this.recognition.onend = () => {
+          this.listening = false;
+        };
+      }
 
-// ── MAIN APPLICATION ───────────────────────────────────────────────────────
-class AriApp {
-    constructor() {
-        // Configuration
-        this.wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-        // Append session_id if available
-        const sess = Utils.loadFromLocal('ari_session');
-        if (sess && sess.session_id) {
-            this.wsUrl += '?session_id=' + encodeURIComponent(sess.session_id);
+      start() {
+        if (!this.recognition || this.listening) return;
+        try {
+          this.listening = true;
+          this.recognition.start();
+        } catch (e) { console.error(e); }
+      }
+
+      stop() {
+        if (this.recognition && this.listening) {
+          this.recognition.stop();
+          this.listening = false;
         }
-        this.PIN_HASH = null;
-        
-        // Managers
-        // auth disabled
-        this.ws = new WsManager(this.wsUrl);
+      }
+
+      toggle() {
+        this.listening ? this.stop() : this.start();
+      }
+    }
+
+    // ============================================
+    // SETTINGS PANEL
+    // ============================================
+    class SettingsPanel {
+      static open(config) {
+        const modal = document.getElementById("settings-modal");
+        const form = document.getElementById("settings-form");
+        form.innerHTML = "";
+        const fields = [
+          { key: "ai_name", label: "AI Name", type: "text" },
+          { key: "model", label: "OpenRouter Model", type: "text" },
+          { key: "system_prompt", label: "System Prompt", type: "textarea" },
+          { key: "edge_voice", label: "Edge TTS Voice", type: "text" },
+          { key: "edge_rate", label: "Rate", type: "text" },
+          { key: "edge_pitch", label: "Pitch", type: "text" },
+          { key: "edge_volume", label: "Volume", type: "text" },
+          { key: "tts_engine", label: "TTS Engine", type: "select", options: ["edge", "piper", "auto", "off"] },
+          { key: "temperature", label: "Temperature (0-1)", type: "number", min:0, max:1, step:0.1 },
+          { key: "max_tokens", label: "Max Tokens", type: "number", min:64, max:4096 },
+          { key: "internet_enabled", label: "Internet Enabled", type: "checkbox" },
+          { key: "avatar_config.mode", label: "Avatar Mode", type: "select", options: ["3d","2d","pixel"] },
+        ];
+        fields.forEach(f => {
+          const group = document.createElement("div");
+          group.className = "form-group" + (f.full ? " full" : "");
+          const label = document.createElement("label");
+          label.textContent = f.label;
+          let input;
+          if (f.type === "select") {
+            input = document.createElement("select");
+            f.options.forEach(opt => {
+              const o = document.createElement("option");
+              o.value = opt; o.textContent = opt;
+              input.appendChild(o);
+            });
+          } else if (f.type === "checkbox") {
+            input = document.createElement("input");
+            input.type = "checkbox";
+          } else {
+            input = document.createElement("input");
+            input.type = f.type;
+            if (f.min !== undefined) input.min = f.min;
+            if (f.max !== undefined) input.max = f.max;
+            if (f.step !== undefined) input.step = f.step;
+          }
+          const val = f.key.split('.').reduce((o, k) => o?.[k], config);
+          if (f.type === "checkbox") input.checked = !!val;
+          else input.value = val ?? "";
+          input.dataset.key = f.key;
+          group.appendChild(label);
+          group.appendChild(input);
+          form.appendChild(group);
+        });
+        modal.classList.add("active");
+      }
+
+      static close() {
+        document.getElementById("settings-modal").classList.remove("active");
+      }
+
+      static getConfig() {
+        const form = document.getElementById("settings-form");
+        const inputs = form.querySelectorAll("input, select");
+        const cfg = {};
+        inputs.forEach(inp => {
+          const key = inp.dataset.key;
+          if (key.includes('.')) {
+            const parts = key.split('.');
+            cfg[parts[0]] = cfg[parts[0]] || {};
+            cfg[parts[0]][parts[1]] = inp.type === "checkbox" ? inp.checked : inp.value;
+          } else {
+            cfg[key] = inp.type === "checkbox" ? inp.checked : (isNaN(Number(inp.value)) ? inp.value : Number(inp.value));
+          }
+        });
+        return cfg;
+      }
+
+      static async save() {
+        const cfg = SettingsPanel.getConfig();
+        WsManager.send("set_config", cfg);
+        SettingsPanel.close();
+      }
+    }
+
+    // ============================================
+    // USAGE DOCK
+    // ============================================
+    class UsageDock {
+      constructor() {
+        this.requestsEl = document.getElementById("usage-requests");
+        this.tokensEl = document.getElementById("usage-tokens");
+        this.freeEl = document.getElementById("cost-free");
+        this.paidEl = document.getElementById("cost-paid");
+      }
+
+      update(stats) {
+        const { free, paid } = stats;
+        const totalReq = free.requests + paid.requests;
+        const totalTokens = free.prompt_tokens + free.completion_tokens + paid.prompt_tokens + paid.completion_tokens;
+        this.requestsEl.textContent = totalReq;
+        this.tokensEl.textContent = totalTokens;
+        this.freeEl.textContent = `Free: $${free.estimated_usd.toFixed(4)}`;
+        this.paidEl.textContent = `Paid: $${paid.estimated_usd.toFixed(4)}`;
+      }
+    }
+
+    // ============================================
+    // MAIN APPLICATION
+    // ============================================
+    class App {
+      constructor() {
+        this.ws = new WsManager();
         this.audio = new AudioQueue();
+        this.auth = new AuthManager();
         this.chat = new ChatManager();
         this.avatar = new AvatarManager();
-        this.voice = new VoiceInput();
         this.usage = new UsageDock();
-        this.settings = new SettingsPanel();
-        
-        // State
-        this.isGenerating = false;
-        this.abortController = null;
-        
-        this.init();
-    }
-    
-    init() {
-        this.bindChat();
-        this.bindVoice();
-        this.bindSettings();
-        this.bindUsageDock();
-        this.bindAvatarControls();
-        this.setupWebSocket();
-        
-        // Dev mode: skip auth screen, show app directly
-        this.showApp();
-    }
+        this.voice = null;
+        this.sessionConfig = { ...CONFIG.DEFAULT_CONFIG };
+        this.ttsAudioEl = null; // For lip-sync
 
-    async doLogin() {
-        if (pin.length < 4) {
-            this.setAuthError('Code PIN trop court');
-            return;
+        this._setupEventListeners();
+        this._setupWSHandlers();
+      }
+
+      async init() {
+        // Init voice
+        this.voice = new VoiceInput(text => {
+          this._sendUserText(text);
+        });
+        document.getElementById("btn-voice").onclick = () => this.voice.toggle();
+
+        // Auto-login if trusted device on localhost
+        if (this.auth.autoLoginIfTrusted()) {
+          this._setUserDisplay(this.auth.currentUser);
         }
-        
-        try {
-            if (success) {
-                this.showApp();
-            } else {
-                // 2FA required
-            }
-        } catch (e) {
-            this.setAuthError(e.message);
-        }
-    }
-    
-    async doRegister() {
-        if (pin.length < 4) {
-            this.setAuthError('Code PIN trop court (min 4 chiffres)');
-            return;
-        }
-        try {
-            this.setAuthError('Compte créé ! Connectez-vous.', false);
-        } catch (e) {
-            this.setAuthError(e.message);
-        }
-    }
-    
-    async do2FAVerify() {
-        if (code.length !== 6) {
-            return;
-        }
-        if (success) {
-            this.showApp();
-        } else {
-        }
-    }
-    
-    setAuthError(msg, isError = true) {
-        el.textContent = msg;
-        el.style.color = isError ? '#ff5252' : '#4caf50';
-    }
-    
-    showApp() {
-        document.getElementById('app-container').style.display = 'flex';
+
+        // Connect WS
         this.ws.connect();
-        this.avatar.init();
-        
-        // Load saved settings
-        const saved = Utils.loadFromLocal('ari_settings');
-        if (saved) {
-            this.settings.apply(saved);
-            this.avatar.setMode(saved.avatarMode);
-            this.audio.setMuted(saved.muted);
-        }
-    }
-    
-    bindChat() {
-        const input = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
-        
-        const sendMessage = () => {
-            const text = input.value.trim();
-            if (!text || this.isGenerating) return;
-            
-            this.chat.addUserMessage(text);
-            input.value = '';
-            this.sendToLLM(text);
-        };
-        
-        sendBtn.onclick = sendMessage;
-        input.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-    }
-    
-    bindVoice() {
-        this.voice.onResult = (text) => {
-            document.getElementById('message-input').value = text;
-            // Auto send? Optional
-        };
-        
-        document.getElementById('voice-btn').onclick = () => {
-            if (this.voice.isListening) {
-                this.voice.stop();
-            } else {
-                this.voice.start();
-            }
-        };
-    }
-    
-    bindSettings() {
-        this.settings.bindEvents((settings) => {
-            Utils.saveToLocal('ari_settings', settings);
-            this.avatar.setMode(settings.avatarMode);
-            this.audio.setMuted(settings.muted);
-        });
-        
-        document.getElementById('logout-btn').onclick = () => {
-            this.ws.close();
-            location.reload();
-        };
-    }
-    
-    bindUsageDock() {
-        const dock = document.getElementById('usage-dock');
-        const toggle = document.getElementById('dock-toggle');
-        let collapsed = false;
-        
-        toggle.onclick = () => {
-            collapsed = !collapsed;
-            dock.classList.toggle('collapsed', collapsed);
-            toggle.textContent = collapsed ? '▶' : '◀';
-        };
-    }
-    
-    bindAvatarControls() {
-        document.querySelectorAll('.mode-btn').forEach(btn => {
-            btn.onclick = () => {
-                const mode = btn.dataset.mode;
-                this.avatar.setMode(mode);
-                const settings = this.settings.currentSettings;
-                settings.avatarMode = mode;
-                Utils.saveToLocal('ari_settings', settings);
-            };
-        });
-    }
-    
-    setupWebSocket() {
-        this.ws.onStatusChange = (status) => {
-            const dot = document.getElementById('ws-status-dot');
-            const text = document.getElementById('ws-status-text');
-            dot.className = 'status-dot ' + status;
-            text.textContent = status === 'connected' ? 'Connecté' : 
-                               status === 'connecting' ? 'Connexion...' : 'Déconnecté';
-        };
-        
-        this.ws.onMessage = (msg) => {
-            this.handleWsMessage(msg);
-        };
-    }
-    
-    async sendToLLM(userMsg) {
-        if (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN) {
-            alert('Pas de connexion serveur');
-            return;
-        }
-        
-        this.isGenerating = true;
-        document.getElementById('send-btn').disabled = true;
-        
-        // Create thinking bubble
-        const bubble = this.chat.startAssistantResponse();
-        this.chat.currentStream.bubble.classList.add('bubble-thinking');
-        
-        // Send request
-        const settings = this.settings.currentSettings;
-        const payload = {
-            type: 'chat',
-            message: userMsg,
-            model: settings.model,
-            system_prompt: settings.systemPrompt,
-            stream: true
-        };
-        
-        this.ws.send(payload);
-        
-        // Track usage
-        this.usage.addUsage('in', this.estimateTokens(userMsg), 1); // 1 cent/token for input
-    }
-    
-    handleWsMessage(msg) {
-        switch (msg.type) {
-            case 'chat_chunk':
-                this.chat.appendToken(msg.token);
-                break;
-                
-            case 'chat_done':
-                this.chat.finishStream();
-                this.isGenerating = false;
-                document.getElementById('send-btn').disabled = false;
-                
-                // Track output usage
-                const fullResponse = this.chat.history[this.chat.history.length-1].content;
-                this.usage.addUsage('out', this.estimateTokens(fullResponse), 2); // 2 cent/token for output
-                break;
-                
-            case 'audio_chunk':
-                if (!msg.audio) return;
-                // Accumulate audio chunks
-                if (!this.audioBuffer) this.audioBuffer = '';
-                this.audioBuffer += msg.audio;
-                break;
-                
-            case 'audio_done':
-                if (this.audioBuffer) {
-                    this.audio.enqueue(this.audioBuffer);
-                    this.audioBuffer = '';
-                }
-                break;
-                
-            case 'error':
-                alert('Erreur: ' + msg.message);
-                this.chat.finishStream();
-                this.isGenerating = false;
-                document.getElementById('send-btn').disabled = false;
-                break;
-        }
-    }
-    
-    estimateTokens(text) {
-        // Rough approximation: 1 token ≈ 4 chars
-        return Math.ceil(text.length / 4);
-    }
-}
+        this._updateStatus("connecting");
+      }
 
-// ── BOOTSTRAP ───────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
-    // Expose app globally for debugging
-    window.ariApp = new AriApp();
-});
-</script>
+      _setupEventListeners() {
+        // Send button
+        document.getElementById("btn-send").onclick = () => {
+          const input = document.getElementById("user-input");
+          const text = input.value.trim();
+          if (text) {
+            this._sendUserText(text);
+            input.value = "";
+          }
+        };
+        document.getElementById("user-input").onkeypress = (e) => {
+          if (e.key === "Enter") document.getElementById("btn-send").click();
+        };
 
+        // Settings
+        document.getElementById("btn-settings").onclick = () => SettingsPanel.open(this.sessionConfig);
+
+        // Avatar mode tabs
+        document.querySelectorAll(".mode-tab").forEach(tab => {
+          tab.onclick = () => {
+            document.querySelectorAll(".mode-tab").forEach(t => t.classList.remove("active"));
+            tab.classList.add("active");
+            const mode = tab.dataset.mode;
+            this.avatar.setMode(mode);
+          };
+        });
+
+        // 2FA cancel button
+        document.getElementById("auth-cancel").onclick = async () => {
+          this.auth.cancel2FA();
+          document.getElementById("auth-modal").classList.remove("active");
+          this.chat.addInfo("Mode local: connexion sans authentification.", "warn");
+          this.auth.currentUser = "local-" + uuid().slice(0,8);
+          this._setUserDisplay(this.auth.currentUser);
+        };
+
+        // WS manager global events
+        window.addEventListener("wsmanager:connected", () => {
+          this.ws.send("get_config", {});
+          this._updateStatus("connected");
+        });
+        window.addEventListener("wsmanager:disconnected", () => this._updateStatus("disconnected"));
+      }
+
+      _setupWSHandlers() {
+        this.ws.on("config", (msg) => {
+          this.sessionConfig = { ...CONFIG.DEFAULT_CONFIG, ...msg.config };
+          this.chat.addInfo(`Connecté en tant que ${this.sessionConfig.ai_name}.`, "info");
+          this._handleAuthFlow();
+        });
+
+        this.ws.on("state", (msg) => {
+          switch (msg.state) {
+            case "thinking":
+              this._updateStatus("thinking", "Ari réfléchit...");
+              this.avatar.statusEl.textContent = "Thinking...";
+              break;
+            case "speaking":
+              this._updateStatus("speaking", "Ari parle...");
+              this.avatar.statusEl.textContent = "Speaking";
+              break;
+            case "idle":
+              this._updateStatus("connected", "Prêt");
+              this.avatar.statusEl.textContent = "Idle";
+              break;
+          }
+        });
+
+        this.ws.on("assistant_chunk", (msg) => {
+          this.chat.appendAiChunk(msg.content, msg.reasoning);
+          // TTS audio data
+          if (msg.tts_audio) {
+            this.audio.enqueue(msg.tts_audio);
+            this._setupLipSync();
+          }
+        });
+
+        this.ws.on("assistant_done", (msg) => {
+          this.chat.finalizeAiBubble(msg.emotion);
+          this.avatar.setEmotion(msg.emotion);
+          this.usage.update(msg.usage);
+          this.chat.addInfo(`Terminé en ${msg.duration.toFixed(1)}s`, "info");
+        });
+
+        this.ws.on("2fa_challenge", (msg) => {
+          this._show2FAModal(msg);
+        });
+
+        this.ws.on("2fa_result", (msg) => {
+          document.getElementById("auth-modal").classList.remove("active");
+          if (msg.success) {
+            this.auth.authenticated = true;
+            this._setUserDisplay(this.auth.currentUser || this.auth._2faPending.userId);
+            this.chat.addInfo("Authentification réussie. Bonjour !", "info");
+          } else {
+            alert("Code incorrect. Essayez à nouveau ou utilisez le mode local.");
+          }
+        });
+
+        this.ws.on("error", (msg) => {
+          this.chat.addInfo(msg.error || "Erreur serveur", "error");
+        });
+      }
+
+      _handleAuthFlow() {
+        const isLocal = /^127\.0\.0\.1$|^::1$|^localhost$/.test(location.hostname);
+        if (isLocal) {
+          this.auth.currentUser = "local-" + uuid().slice(0,8);
+          this._setUserDisplay(this.auth.currentUser);
+          return;
+        }
+        // Remote: request 2FA
+        this.auth.request2FA("remote-user")
+          .then(() => {
+            // Modal shown by handler
+          })
+          .catch(() => {
+            this.chat.addInfo("Erreur 2FA, passage en mode local.", "warn");
+            this.auth.currentUser = "local-" + uuid().slice(0,8);
+            this._setUserDisplay(this.auth.currentUser);
+          });
+      }
+
+      _show2FAModal(msg) {
+        const modal = document.getElementById("auth-modal");
+        const dots = ["pin-1","pin-2","pin-3","pin-4"].map(id => document.getElementById(id));
+        dots.forEach(d => { d.textContent = ""; d.classList.remove("filled"); });
+        const keypad = document.getElementById("pin-keypad");
+        keypad.innerHTML = "";
+        // Generate random button order with one correct
+        const correctCode = Math.floor(Math.random()*9000+1000);
+        // Store expected code on server; client sends arbitrary, server validates
+        // For UI demo we just show a challenge
+        const buttons = [1,2,3,4,5,6,7,8,9,0].sort(() => Math.random()-0.5);
+        buttons.forEach(num => {
+          const btn = document.createElement("button");
+          btn.className = "pin-btn";
+          btn.textContent = num;
+          btn.onclick = () => this._handlePinPress(num, dots);
+          keypad.appendChild(btn);
+        });
+        modal.classList.add("active");
+        // For demo: last dot filled triggers verify (in real flow, we send code to server after 4 digits)
+        this._pinBuffer = [];
+      }
+
+      _handlePinPress(num, dots) {
+        this._pinBuffer.push(num);
+        dots[this._pinBuffer.length-1].textContent = num;
+        dots[this._pinBuffer.length-1].classList.add("filled");
+        if (this._pinBuffer.length === 4) {
+          const code = this._pinBuffer.join("");
+          this.auth.verify2FA(code).catch(() => {
+            this._pinBuffer = [];
+            dots.forEach(d => { d.textContent = ""; d.classList.remove("filled"); });
+            alert("Code incorrect.");
+          });
+        }
+      }
+
+      _sendUserText(text) {
+        this.ws.send("user_text", {
+          text,
+          silent: false,
+          profile: "default",
+          user_id: this.auth.currentUser || "anon"
+        });
+        this.chat.addUserBubble(text);
+      }
+
+      _updateStatus(state, text) {
+        const dot = document.getElementById("status-dot");
+        dot.className = "dot " + state;
+        document.getElementById("status-text").textContent = text || state;
+      }
+
+      _setUserDisplay(userId) {
+        document.getElementById("user-display").textContent = `User: ${userId}`;
+      }
+
+      _setupLipSync() {
+        if (!this.ttsAudioEl) {
+          this.ttsAudioEl = new Audio();
+          this.ttsAudioEl.addEventListener("ended", () => {
+            if (this.avatar.audioAnalyser) {
+              // Reset mouth after short delay
+              setTimeout(() => {
+                if (this.avatar.mode === "2d") this.avatar.mouthOpen = 0;
+              }, 200);
+            }
+          });
+        }
+        // Hook audio element to queue playback (internal to AudioQueue) - we need to capture
+        // Since AudioQueue creates Audio objects internally, patch _playNext to hook audio
+        // Simplified: lip sync for Live2D uses analyser from main audio element
+        const origPlayNext = this.audio._playNext.bind(this.audio);
+        this.audio._playNext = () => {
+          if (this.audio.queue.length > 0) {
+            // Next audio will have mouth open via analyser set externally
+          }
+          origPlayNext();
+        };
+      }
+    }
+
+    // ============================================
+    // START APPLICATION
+    // ============================================
+    window.clock = { getDelta: () => 0.016 };
+    const app = new App();
+    app.init();
+  </script>
 </body>
 </html>
