@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import httpx
 from edge_tts import Communicate
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Body
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -102,6 +102,13 @@ class TrustedDevice(BaseModel):
     device_id: str
     user_id: str
     added_at: datetime
+
+
+# ============ AUTH STORES (in-memory) ============
+# In production: use Redis or database
+_users: Dict[str, Dict] = {}  # pin_hash -> {created, last_login, device_ids}
+_sessions: Dict[str, UserSession] = {}  # session_id -> UserSession
+_trusted_devices: Dict[str, str] = {}  # device_id -> pin_hash
 
 class WSAuth2FABegin(BaseModel):
     """Payload to initiate 2FA."""
