@@ -913,14 +913,17 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket, client_id)
     # ============ WEBSOCKET AUTH (simple session check) ============
     # Extract session ID from query params or first message
+    # Dev mode: accept both session-based and anonymous connections
     session_id = websocket.query_params.get("session_id")
-    if not session_id or session_id not in _sessions:
-        await websocket.close(code=4001, reason="Unauthorized: invalid session")
-        return
-    
-    session = _sessions[session_id]
-    session.last_seen = datetime.utcnow()
-    user_id = session.user_id
+    if session_id and session_id in _sessions:
+        # Authenticated session
+        session = _sessions[session_id]
+        session.last_seen = datetime.utcnow()
+        user_id = session.user_id
+    else:
+        # Anonymous connection — use client_id as user_id (ephemeral)
+        user_id = f"anon-{client_id}"
+        # No session, but connection is accepted
 
     
     # Start heartbeat task if not running

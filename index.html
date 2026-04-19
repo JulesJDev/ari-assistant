@@ -912,110 +912,19 @@ const Utils = {
 // ── AUTH MANAGER ────────────────────────────────────────────────────────────
 class AuthManager {
     constructor() {
-        this.users = Utils.loadFromLocal('ari_users') || {};
-        this.session = Utils.loadFromLocal('ari_session');
-        this.deviceId = Utils.loadFromLocal('ari_device_id') || Utils.generateId();
-        Utils.saveToLocal('ari_device_id', this.deviceId);
-        
+        this.session = { user_id: 'dev-user', deviceId: 'dev-device' };
+        Utils.saveToLocal('ari_session', this.session);
         this.onLogin = null;
         this.on2FARequired = null;
     }
     
-    async register(pin) {
-        const hash = await Utils.hash256(pin);
-        if (this.users[hash]) throw new Error('PIN déjà utilisé');
-        
-        // Call backend to create user + session
-        const resp = await fetch('/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                pin_hash: hash,
-                device_id: this.deviceId
-            })
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || 'Échec inscription');
-        }
-        const data = await resp.json();
-        
-        // Save locally
-        this.users[hash] = { created: Date.now(), server_user_id: data.user_id };
-        Utils.saveToLocal('ari_users', this.users);
-        
-        // Save session (server-issued)
-        this.session = { 
-            session_id: data.session_id,
-            user_id: data.user_id,
-            deviceId: data.device_id 
-        };
-        Utils.saveToLocal('ari_session', this.session);
-        
-        return true;
-    }
-    
-    async login(pin) {
-        const hash = await Utils.hash256(pin);
-        if (!this.users[hash]) throw new Error('PIN incorrect');
-        
-        // Call backend to login + get session
-        const resp = await fetch('/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin_hash: hash })
-        });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || 'Échec connexion');
-        }
-        const data = await resp.json();
-        
-        const userKey = hash;
-        
-        // Check trusted device
-        const trusted = Utils.loadFromLocal('ari_trusted_devices') || {};
-        if (trusted[this.deviceId]) {
-            this.session = { userKey, deviceId: this.deviceId };
-            Utils.saveToLocal('ari_session', this.session);
-            return true;
-        }
-        
-        // Check if network connection (not loopback)
-        const isNetwork = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
-        if (isNetwork) {
-            this.pendingLogin = { userKey };
-            this.on2FARequired && this.on2FARequired();
-            return false; // 2FA required
-        }
-        
-        this.session = { userKey, deviceId: this.deviceId };
-        Utils.saveToLocal('ari_session', this.session);
-        return true;
-    }
-    
-    verify2FA(code) {
-        // Simulated 2FA (in reality would check against secret)
-        const secret = Utils.loadFromLocal('ari_2fa_secret') || '123456';
-        if (code === secret) {
-            const { userKey } = this.pendingLogin;
-            const trusted = Utils.loadFromLocal('ari_trusted_devices') || {};
-            trusted[this.deviceId] = Date.now();
-            Utils.saveToLocal('ari_trusted_devices', trusted);
-            this.session = { userKey, deviceId: this.deviceId };
-            Utils.saveToLocal('ari_session', this.session);
-            this.pendingLogin = null;
-            return true;
-        }
-        return false;
-    }
-    
+    async register(pin) { return true; }
+    async login(pin) { return true; }
     logout() {
         this.session = null;
         localStorage.removeItem('ari_session');
     }
-    
-    isLoggedIn() { return !!this.session; }
+    isLoggedIn() { return true; }
 }
 
 // ── WEBSOCKET MANAGER ───────────────────────────────────────────────────────
@@ -1626,12 +1535,8 @@ class AriApp {
         this.bindAvatarControls();
         this.setupWebSocket();
         
-        // Check session
-        if (this.auth.isLoggedIn()) {
-            this.showApp();
-        } else {
-            document.getElementById('auth-container').style.display = 'flex';
-        }
+        // Dev mode: skip auth screen, show app directly
+        this.showApp();
     }
     
     bindAuth() {
