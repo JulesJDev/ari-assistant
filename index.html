@@ -42,85 +42,6 @@
             z-index: 9999;
         }
         
-        /* AUTH SCREEN */
-        #auth-container {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            backdrop-filter: blur(10px);
-        }
-        
-        .auth-box {
-            background: var(--bg-panel);
-            border: 3px solid var(--gold-amber);
-            border-radius: 15px;
-            padding: 40px;
-            box-shadow: 0 0 40px rgba(255, 179, 0, 0.3);
-            text-align: center;
-            max-width: 400px;
-            width: 90%;
-        }
-        
-        .auth-title {
-            font-family: 'MedievalSharp', cursive;
-            font-size: 2.5em;
-            color: var(--gold-amber);
-            margin-bottom: 30px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-        }
-        
-        .pin-input {
-            width: 100%;
-            padding: 15px;
-            font-size: 1.5em;
-            text-align: center;
-            background: var(--bg-input);
-            border: 2px solid var(--gold-light);
-            color: var(--text-light);
-            border-radius: 8px;
-            margin-bottom: 20px;
-            letter-spacing: 10px;
-            font-family: 'Courier New', monospace;
-        }
-        
-        .btn {
-            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
-            border: none;
-            padding: 12px 30px;
-            font-size: 1.1em;
-            color: var(--brown-dark);
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            margin: 5px;
-        }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(255, 179, 0, 0.5);
-        }
-        
-        .btn:active {
-            transform: translateY(0);
-        }
-        
-        .btn-secondary {
-            background: linear-gradient(180deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
-            color: white;
-        }
-        
-        .error-msg {
-            color: #ff5252;
-            margin-top: 15px;
-            font-size: 0.9em;
-        }
-        
         /* MAIN APP LAYOUT */
         #app-container {
             display: none;
@@ -565,118 +486,9 @@
             box-shadow: 0 0 10px rgba(255, 179, 0, 0.4);
         }
         
-        /* 2FA SCREEN */
-        #2fa-container {
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 10002;
-            backdrop-filter: blur(10px);
-        }
-        
-        /* AUDIO VISUALIZER */
-        #audio-visualizer {
-            position: absolute;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 4px;
-            align-items: flex-end;
-            height: 40px;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        
-        #audio-visualizer.active {
-            opacity: 1;
-        }
-        
-        .audio-bar {
-            width: 4px;
-            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
-            border-radius: 2px;
-            animation: audio-wave 0.8s ease-in-out infinite;
-        }
-        
-        .audio-bar:nth-child(1) { animation-delay: 0s; height: 60%; }
-        .audio-bar:nth-child(2) { animation-delay: 0.1s; height: 80%; }
-        .audio-bar:nth-child(3) { animation-delay: 0.2s; height: 100%; }
-        .audio-bar:nth-child(4) { animation-delay: 0.3s; height: 80%; }
-        .audio-bar:nth-child(5) { animation-delay: 0.4s; height: 60%; }
-        
-        @keyframes audio-wave {
-            0%, 100% { transform: scaleY(0.5); }
-            50% { transform: scaleY(1); }
-        }
-        
-        /* SCROLLBAR STYLING */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-dark); }
-        ::-webkit-scrollbar-thumb { background: var(--brown-light); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--gold-amber); }
-        
-        /* MOBILE FALLBACK */
-        @media (max-width: 768px) {
-            #main-content { flex-direction: column; }
-            #avatar-zone { width: 100%; height: 40%; }
-            #chat-zone { width: 100%; height: 60%; }
-            #usage-dock { 
-                bottom: 10px; 
-                left: 10px; 
-                min-width: 200px; 
-                font-size: 0.8em;
-            }
-            .auth-box { padding: 20px; }
-            .pin-input { font-size: 1.2em; letter-spacing: 5px; }
-        }
-        
-        /* LOADING SPINNER */
-        .spinner {
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 179, 0, 0.3);
-            border-top-color: var(--gold-amber);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
+        </style>
 </head>
 <body>
-
-<!-- AUTHENTICATION SCREEN -->
-<div id="auth-container" style="display: none;">
-    <div class="auth-box">
-        <div class="auth-title">✨ La Taverne d'Ari ✨</div>
-        <input type="password" id="pin-input" class="pin-input" placeholder="••••" maxlength="6" autocomplete="off">
-        <div>
-            <button id="login-btn" class="btn">Entrer</button>
-            <button id="register-btn" class="btn btn-secondary">Créer compte</button>
-        </div>
-        <div id="auth-error" class="error-msg"></div>
-    </div>
-</div>
-
-<!-- 2FA SCREEN -->
-<div id="2fa-container">
-    <div class="auth-box">
-        <div class="auth-title">🔐 double authentification</div>
-        <div style="margin-bottom: 20px; color: var(--text-dim);">
-            Entrez le code à 6 chiffres envoyé à votre appareil
-        </div>
-        <input type="text" id="2fa-input" class="pin-input" placeholder="123456" maxlength="6" pattern="[0-9]*">
-        <div>
-            <button id="2fa-verify-btn" class="btn">Vérifier</button>
-            <button id="2fa-cancel-btn" class="btn btn-secondary">Annuler</button>
-        </div>
-        <div id="2fa-error" class="error-msg"></div>
-    </div>
-</div>
 
 <!-- MAIN APP -->
 <div id="app-container" style="display: none;">
@@ -910,22 +722,6 @@ const Utils = {
 };
 
 // ── AUTH MANAGER ────────────────────────────────────────────────────────────
-class AuthManager {
-    constructor() {
-        this.session = { user_id: 'dev-user', deviceId: 'dev-device' };
-        Utils.saveToLocal('ari_session', this.session);
-        this.onLogin = null;
-        this.on2FARequired = null;
-    }
-    
-    async register(pin) { return true; }
-    async login(pin) { return true; }
-    logout() {
-        this.session = null;
-        localStorage.removeItem('ari_session');
-    }
-    isLoggedIn() { return true; }
-}
 
 // ── WEBSOCKET MANAGER ───────────────────────────────────────────────────────
 class WsManager {
@@ -1510,7 +1306,7 @@ class AriApp {
         this.PIN_HASH = null;
         
         // Managers
-        this.auth = new AuthManager();
+        // auth disabled
         this.ws = new WsManager(this.wsUrl);
         this.audio = new AudioQueue();
         this.chat = new ChatManager();
@@ -1527,7 +1323,6 @@ class AriApp {
     }
     
     init() {
-        this.bindAuth();
         this.bindChat();
         this.bindVoice();
         this.bindSettings();
@@ -1538,57 +1333,18 @@ class AriApp {
         // Dev mode: skip auth screen, show app directly
         this.showApp();
     }
-    
-    bindAuth() {
-        const pinInput = document.getElementById('pin-input');
-        const loginBtn = document.getElementById('login-btn');
-        const registerBtn = document.getElementById('register-btn');
-        const errorDiv = document.getElementById('auth-error');
-        
-        // PIN input: only numbers
-        pinInput.addEventListener('input', (e) => {
-            e.target.value = e.target.value.replace(/[^0-9]/g, '');
-        });
-        
-        // Login with Enter
-        pinInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.doLogin();
-        });
-        
-        loginBtn.onclick = () => this.doLogin();
-        registerBtn.onclick = () => this.doRegister();
-        
-        // 2FA handlers
-        document.getElementById('2fa-verify-btn').onclick = () => this.do2FAVerify();
-        document.getElementById('2fa-cancel-btn').onclick = () => {
-            document.getElementById('2fa-container').style.display = 'none';
-        };
-        
-        // 2FA input
-        document.getElementById('2fa-input').addEventListener('input', (e) => {
-            e.target.value = e.target.value.replace(/[^0-9]/g, '');
-        });
-        document.getElementById('2fa-input').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.do2FAVerify();
-        });
-    }
-    
+
     async doLogin() {
-        const pin = document.getElementById('pin-input').value;
         if (pin.length < 4) {
             this.setAuthError('Code PIN trop court');
             return;
         }
         
         try {
-            const success = await this.auth.login(pin);
             if (success) {
                 this.showApp();
             } else {
                 // 2FA required
-                document.getElementById('auth-container').style.display = 'none';
-                document.getElementById('2fa-container').style.display = 'flex';
-                document.getElementById('2fa-error').textContent = '';
             }
         } catch (e) {
             this.setAuthError(e.message);
@@ -1596,13 +1352,11 @@ class AriApp {
     }
     
     async doRegister() {
-        const pin = document.getElementById('pin-input').value;
         if (pin.length < 4) {
             this.setAuthError('Code PIN trop court (min 4 chiffres)');
             return;
         }
         try {
-            await this.auth.register(pin);
             this.setAuthError('Compte créé ! Connectez-vous.', false);
         } catch (e) {
             this.setAuthError(e.message);
@@ -1610,28 +1364,21 @@ class AriApp {
     }
     
     async do2FAVerify() {
-        const code = document.getElementById('2fa-input').value;
         if (code.length !== 6) {
-            document.getElementById('2fa-error').textContent = 'Code à 6 chiffres requis';
             return;
         }
-        const success = this.auth.verify2FA(code);
         if (success) {
-            document.getElementById('2fa-container').style.display = 'none';
             this.showApp();
         } else {
-            document.getElementById('2fa-error').textContent = 'Code incorrect';
         }
     }
     
     setAuthError(msg, isError = true) {
-        const el = document.getElementById('auth-error');
         el.textContent = msg;
         el.style.color = isError ? '#ff5252' : '#4caf50';
     }
     
     showApp() {
-        document.getElementById('auth-container').style.display = 'none';
         document.getElementById('app-container').style.display = 'flex';
         this.ws.connect();
         this.avatar.init();
@@ -1691,7 +1438,6 @@ class AriApp {
         
         document.getElementById('logout-btn').onclick = () => {
             this.ws.close();
-            this.auth.logout();
             location.reload();
         };
     }
