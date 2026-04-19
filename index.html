@@ -1,0 +1,1828 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ari - Assistant Vocal IA - Taverne RPG</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=MedievalSharp&display=swap" rel="stylesheet">
+    <style>
+        /* RESET & BASE */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-dark: #0a0a0a;
+            --bg-panel: rgba(30, 20, 10, 0.95);
+            --bg-input: rgba(20, 15, 8, 0.9);
+            --gold-amber: #ffb300;
+            --gold-light: #ffd54f;
+            --blue-cyan: #00bcd4;
+            --blue-dark: #006064;
+            --brown-dark: #3e2723;
+            --brown-light: #5d4037;
+            --text-light: #f5f5dc;
+            --text-dim: #b0a080;
+        }
+        
+        body {
+            font-family: 'Cinzel', serif;
+            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
+            color: var(--text-light);
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        /* NOISE TEXTURE OVERLAY */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+        }
+        
+        /* AUTH SCREEN */
+        #auth-container {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            backdrop-filter: blur(10px);
+        }
+        
+        .auth-box {
+            background: var(--bg-panel);
+            border: 3px solid var(--gold-amber);
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 0 40px rgba(255, 179, 0, 0.3);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        .auth-title {
+            font-family: 'MedievalSharp', cursive;
+            font-size: 2.5em;
+            color: var(--gold-amber);
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        .pin-input {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.5em;
+            text-align: center;
+            background: var(--bg-input);
+            border: 2px solid var(--gold-light);
+            color: var(--text-light);
+            border-radius: 8px;
+            margin-bottom: 20px;
+            letter-spacing: 10px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .btn {
+            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1em;
+            color: var(--brown-dark);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(255, 179, 0, 0.5);
+        }
+        
+        .btn:active {
+            transform: translateY(0);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(180deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
+            color: white;
+        }
+        
+        .error-msg {
+            color: #ff5252;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+        
+        /* MAIN APP LAYOUT */
+        #app-container {
+            display: none;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* HEADER */
+        .header {
+            height: 60px;
+            background: linear-gradient(180deg, rgba(62, 39, 35, 0.9) 0%, rgba(30, 20, 10, 0.95) 100%);
+            border-bottom: 3px solid var(--gold-amber);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        
+        .app-title {
+            font-family: 'MedievalSharp', cursive;
+            font-size: 1.8em;
+            color: var(--gold-amber);
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+        }
+        
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 12px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            font-size: 0.85em;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff5252;
+            box-shadow: 0 0 5px currentColor;
+            transition: background 0.3s;
+        }
+        
+        .status-dot.connected { background: #4caf50; }
+        .status-dot.connecting { background: #ff9800; }
+        
+        /* MAIN CONTENT AREA */
+        #main-content {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* AVATAR ZONE (LEFT) */
+        #avatar-zone {
+            width: 45%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            background: radial-gradient(ellipse at center, rgba(62, 39, 35, 0.3) 0%, transparent 70%);
+        }
+        
+        #avatar-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        #three-canvas, #pixi-canvas, #pixel-orbe {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        #pixel-orbe {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            background: radial-gradient(circle, var(--gold-amber) 0%, var(--gold-light) 40%, rgba(255,179,0,0) 70%);
+            border-radius: 50%;
+            box-shadow: 0 0 60px var(--gold-amber);
+            animation: orbe-pulse 2s ease-in-out infinite;
+            image-rendering: pixelated;
+        }
+        
+        @keyframes orbe-pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+            50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+        }
+        
+        /* CHAT ZONE (RIGHT) */
+        #chat-zone {
+            width: 55%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(180deg, rgba(10, 10, 10, 0.95) 0%, rgba(20, 15, 8, 0.9) 100%);
+            border-left: 2px solid var(--brown-dark);
+        }
+        
+        #chat-history {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            scroll-behavior: smooth;
+        }
+        
+        .chat-bubble {
+            max-width: 85%;
+            padding: 15px 20px;
+            border-radius: 15px;
+            position: relative;
+            animation: bubble-appear 0.3s ease-out;
+            word-wrap: break-word;
+        }
+        
+        @keyframes bubble-appear {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .bubble-user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+            box-shadow: 0 4px 10px rgba(0, 188, 212, 0.3);
+        }
+        
+        .bubble-assistant {
+            align-self: flex-start;
+            background: linear-gradient(135deg, var(--gold-light) 0%, var(--gold-amber) 100%);
+            color: var(--brown-dark);
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 4px 10px rgba(255, 179, 0, 0.3);
+        }
+        
+        .bubble-thinking {
+            border-left: 4px solid #ff9800;
+            animation: thinking-pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes thinking-pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+        
+        /* INPUT AREA */
+        #input-area {
+            padding: 15px;
+            background: var(--bg-panel);
+            border-top: 2px solid var(--brown-dark);
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        
+        #message-input {
+            flex: 1;
+            resize: none;
+            min-height: 44px;
+            max-height: 120px;
+            padding: 10px 15px;
+            background: var(--bg-input);
+            border: 2px solid var(--brown-light);
+            color: var(--text-light);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 1em;
+            line-height: 1.4;
+        }
+        
+        #message-input:focus {
+            outline: none;
+            border-color: var(--gold-amber);
+            box-shadow: 0 0 10px rgba(255, 179, 0, 0.3);
+        }
+        
+        .input-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .voice-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(180deg, var(--blue-cyan) 0%, var(--blue-dark) 100%);
+            border: 2px solid var(--blue-cyan);
+            color: white;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .voice-btn.listening {
+            background: linear-gradient(180deg, #ff5252 0%, #b71c1c 100%);
+            border-color: #ff5252;
+            animation: pulse-listen 1s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-listen {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 82, 82, 0); }
+        }
+        
+        .send-btn {
+            height: 44px;
+            padding: 0 20px;
+            border-radius: 8px;
+            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
+            border: none;
+            color: var(--brown-dark);
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .send-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* USAGE DOCK (BOTTOM LEFT) */
+        #usage-dock {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: var(--bg-panel);
+            border: 2px solid var(--gold-amber);
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 280px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        
+        #usage-dock.collapsed {
+            transform: translateX(calc(-100% - 30px));
+        }
+        
+        .dock-toggle {
+            position: absolute;
+            right: -40px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            background: var(--gold-amber);
+            border: none;
+            border-radius: 0 8px 8px 0;
+            color: var(--brown-dark);
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+        
+        .dock-header {
+            font-size: 0.9em;
+            color: var(--gold-amber);
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .usage-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .stat-item {
+            background: rgba(0,0,0,0.3);
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 0.85em;
+        }
+        
+        .stat-label {
+            color: var(--text-dim);
+            margin-bottom: 3px;
+        }
+        
+        .stat-value {
+            color: var(--text-light);
+            font-weight: bold;
+        }
+        
+        #usage-sparkline {
+            width: 100%;
+            height: 40px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+        
+        /* SETTINGS PANEL */
+        #settings-panel {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: var(--bg-panel);
+            border: 2px solid var(--gold-amber);
+            border-radius: 12px;
+            padding: 20px;
+            width: 320px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+            display: none;
+            z-index: 1001;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        
+        #settings-panel.open {
+            display: block;
+            animation: settings-slide 0.3s ease-out;
+        }
+        
+        @keyframes settings-slide {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        .settings-title {
+            font-family: 'MedievalSharp', cursive;
+            color: var(--gold-amber);
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .settings-group {
+            margin-bottom: 15px;
+        }
+        
+        .settings-label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-dim);
+            font-size: 0.9em;
+        }
+        
+        .settings-select, .settings-input {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg-input);
+            border: 1px solid var(--brown-light);
+            color: var(--text-light);
+            border-radius: 6px;
+            font-family: inherit;
+        }
+        
+        .switch-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+        
+        .switch input { opacity: 0; width: 0; height: 0; }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--brown-dark);
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        
+        input:checked + .slider { background: var(--gold-amber); }
+        input:checked + .slider:before { transform: translateX(24px); }
+        
+        /* AVATAR CONTROLS (FLOATING) */
+        #avatar-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            background: var(--bg-panel);
+            padding: 10px;
+            border-radius: 10px;
+            border: 2px solid var(--brown-dark);
+        }
+        
+        .mode-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 2px solid var(--brown-light);
+            background: var(--bg-input);
+            color: var(--text-light);
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1.2em;
+        }
+        
+        .mode-btn.active {
+            border-color: var(--gold-amber);
+            background: rgba(255, 179, 0, 0.2);
+            box-shadow: 0 0 10px rgba(255, 179, 0, 0.4);
+        }
+        
+        /* 2FA SCREEN */
+        #2fa-container {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at center, #1a120b 0%, #0a0a0a 100%);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10002;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* AUDIO VISUALIZER */
+        #audio-visualizer {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 4px;
+            align-items: flex-end;
+            height: 40px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        #audio-visualizer.active {
+            opacity: 1;
+        }
+        
+        .audio-bar {
+            width: 4px;
+            background: linear-gradient(180deg, var(--gold-light) 0%, var(--gold-amber) 100%);
+            border-radius: 2px;
+            animation: audio-wave 0.8s ease-in-out infinite;
+        }
+        
+        .audio-bar:nth-child(1) { animation-delay: 0s; height: 60%; }
+        .audio-bar:nth-child(2) { animation-delay: 0.1s; height: 80%; }
+        .audio-bar:nth-child(3) { animation-delay: 0.2s; height: 100%; }
+        .audio-bar:nth-child(4) { animation-delay: 0.3s; height: 80%; }
+        .audio-bar:nth-child(5) { animation-delay: 0.4s; height: 60%; }
+        
+        @keyframes audio-wave {
+            0%, 100% { transform: scaleY(0.5); }
+            50% { transform: scaleY(1); }
+        }
+        
+        /* SCROLLBAR STYLING */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--brown-light); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--gold-amber); }
+        
+        /* MOBILE FALLBACK */
+        @media (max-width: 768px) {
+            #main-content { flex-direction: column; }
+            #avatar-zone { width: 100%; height: 40%; }
+            #chat-zone { width: 100%; height: 60%; }
+            #usage-dock { 
+                bottom: 10px; 
+                left: 10px; 
+                min-width: 200px; 
+                font-size: 0.8em;
+            }
+            .auth-box { padding: 20px; }
+            .pin-input { font-size: 1.2em; letter-spacing: 5px; }
+        }
+        
+        /* LOADING SPINNER */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 179, 0, 0.3);
+            border-top-color: var(--gold-amber);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<!-- AUTHENTICATION SCREEN -->
+<div id="auth-container">
+    <div class="auth-box">
+        <div class="auth-title">✨ La Taverne d'Ari ✨</div>
+        <input type="password" id="pin-input" class="pin-input" placeholder="••••" maxlength="6" autocomplete="off">
+        <div>
+            <button id="login-btn" class="btn">Entrer</button>
+            <button id="register-btn" class="btn btn-secondary">Créer compte</button>
+        </div>
+        <div id="auth-error" class="error-msg"></div>
+    </div>
+</div>
+
+<!-- 2FA SCREEN -->
+<div id="2fa-container">
+    <div class="auth-box">
+        <div class="auth-title">🔐 double authentification</div>
+        <div style="margin-bottom: 20px; color: var(--text-dim);">
+            Entrez le code à 6 chiffres envoyé à votre appareil
+        </div>
+        <input type="text" id="2fa-input" class="pin-input" placeholder="123456" maxlength="6" pattern="[0-9]*">
+        <div>
+            <button id="2fa-verify-btn" class="btn">Vérifier</button>
+            <button id="2fa-cancel-btn" class="btn btn-secondary">Annuler</button>
+        </div>
+        <div id="2fa-error" class="error-msg"></div>
+    </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app-container" style="display: none;">
+    <!-- HEADER -->
+    <header class="header">
+        <div class="header-controls">
+            <div class="status-indicator">
+                <div id="ws-status-dot" class="status-dot"></div>
+                <span id="ws-status-text">Déconnecté</span>
+            </div>
+        </div>
+        
+        <div class="app-title">🍻 La Taverne d'Ari</div>
+        
+        <div class="header-controls">
+            <button class="btn" style="padding: 8px 16px; font-size: 0.9em;" id="settings-btn">⚙️ Paramètres</button>
+            <button class="btn btn-secondary" style="padding: 8px 16px; font-size: 0.9em;" id="logout-btn">🚪</button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <div id="main-content">
+        <!-- AVATAR ZONE (LEFT) -->
+        <div id="avatar-zone">
+            <div id="avatar-container">
+                <!-- Three.js Canvas for VRM -->
+                <canvas id="three-canvas" style="display: none;"></canvas>
+                <!-- PixiJS Canvas for Live2D -->
+                <canvas id="pixi-canvas" style="display: none;"></canvas>
+                <!-- Pixel Orb -->
+                <div id="pixel-orbe" style="display: none;"></div>
+            </div>
+            
+            <!-- Audio Visualizer -->
+            <div id="audio-visualizer">
+                <div class="audio-bar"></div>
+                <div class="audio-bar"></div>
+                <div class="audio-bar"></div>
+                <div class="audio-bar"></div>
+                <div class="audio-bar"></div>
+            </div>
+        </div>
+
+        <!-- CHAT ZONE (RIGHT) -->
+        <div id="chat-zone">
+            <div id="chat-history">
+                <!-- Chat bubbles will be inserted here -->
+            </div>
+            
+            <div id="input-area">
+                <textarea id="message-input" placeholder="Parlez à Ari... (ou utilisez le micro)"></textarea>
+                <div class="input-controls">
+                    <button id="voice-btn" class="voice-btn" title="Voix">🎤</button>
+                    <button id="send-btn" class="send-btn">Envoyer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- USAGE DOCK -->
+    <div id="usage-dock">
+        <button class="dock-toggle" id="dock-toggle">◀</button>
+        <div class="dock-header">
+            <span>📊 Coûts & Usage</span>
+            <span id="total-cost">0.00€</span>
+        </div>
+        <div class="usage-stats">
+            <div class="stat-item">
+                <div class="stat-label">Tokens entrants</div>
+                <div class="stat-value" id="tokens-in">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Tokens sortants</div>
+                <div class="stat-value" id="tokens-out">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Coût entrée</div>
+                <div class="stat-value" id="cost-in">0.00€</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Coût sortie</div>
+                <div class="stat-value" id="cost-out">0.00€</div>
+            </div>
+        </div>
+        <canvas id="usage-sparkline"></canvas>
+    </div>
+
+    <!-- SETTINGS PANEL -->
+    <div id="settings-panel">
+        <h3 class="settings-title">⚙️ Paramètres d'Ari</h3>
+        
+        <div class="settings-group">
+            <label class="settings-label">Modèle LLM</label>
+            <select id="model-select" class="settings-select">
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                <option value="claude-3">Claude 3</option>
+                <option value="local">Modèle Local (Llama 2)</option>
+            </select>
+        </div>
+        
+        <div class="settings-group">
+            <label class="settings-label">Voix TTS</label>
+            <select id="voice-select" class="settings-select">
+                <option value="female-fr">Féminine (FR)</option>
+                <option value="male-fr">Masculine (FR)</option>
+                <option value="female-en">Féminine (EN)</option>
+                <option value="male-en">Masculine (EN)</option>
+            </select>
+        </div>
+        
+        <div class="settings-group">
+            <label class="settings-label">Mode Avatar</label>
+            <select id="avatar-mode-select" class="settings-select">
+                <option value="3d">3D (VRM)</option>
+                <option value="2d">2D (Live2D)</option>
+                <option value="pixel">Pixel (Orbe 8-bit)</option>
+            </select>
+        </div>
+        
+        <div class="settings-group">
+            <label class="settings-label">Prompt Système</label>
+            <textarea id="system-prompt" class="settings-input" rows="3" style="resize: vertical;">Tu es Ari, une asistante vocale IA serviable et amicale. Tu résides dans une taverne médiévale. Sois concis et chaleureux.</textarea>
+        </div>
+        
+        <div class="settings-group switch-container">
+            <label class="settings-label">Mute Audio</label>
+            <label class="switch">
+                <input type="checkbox" id="mute-switch">
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <div class="settings-group switch-container">
+            <label class="settings-label">Mode sombre renforcé</label>
+            <label class="switch">
+                <input type="checkbox" id="darkmode-switch" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        
+        <button id="save-settings-btn" class="btn" style="width: 100%; margin-top: 10px;">💾 Sauvegarder</button>
+    </div>
+
+    <!-- AVATAR CONTROLS -->
+    <div id="avatar-controls">
+        <button class="mode-btn active" data-mode="3d" title="Mode 3D">🎭</button>
+        <button class="mode-btn" data-mode="2d" title="Mode 2D">🎨</button>
+        <button class="mode-btn" data-mode="pixel" title="Mode Pixel">👾</button>
+    </div>
+</div>
+
+<!-- CDN LIBRARIES -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r163/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.163.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.163.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.0.0/lib/three-vrm.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/index.min.js"></script>
+
+<script>
+/**
+ * ARI - FRONTEND SPA COMPLET
+ * Style Taverne RPG
+ */
+
+// ── UTILITAIRES ─────────────────────────────────────────────────────────────
+const Utils = {
+    generateId: () => Math.random().toString(36).substr(2, 9),
+    
+    hash256: async (msg) => {
+        const msgBuffer = new TextEncoder().encode(msg);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    },
+    
+    saveToLocal: (key, data) => localStorage.setItem(key, JSON.stringify(data)),
+    loadFromLocal: (key) => {
+        const d = localStorage.getItem(key);
+        return d ? JSON.parse(d) : null;
+    },
+    
+    formatCost: (cents) => (cents / 100).toFixed(2) + '€',
+    
+    // Sparkline canvas
+    drawSparkline: (canvas, values, color = '#ffb300') => {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = canvas.offsetWidth * 2;
+        const h = canvas.height = canvas.offsetHeight * 2;
+        ctx.clearRect(0,0,w,h);
+        if (!values || values.length < 2) return;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const max = Math.max(...values) || 1;
+        const step = w / (values.length - 1);
+        values.forEach((v,i) => {
+            const x = i * step;
+            const y = h - (v / max) * (h * 0.8) - (h * 0.1);
+            i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+    }
+};
+
+// ── AUTH MANAGER ────────────────────────────────────────────────────────────
+class AuthManager {
+    constructor() {
+        this.users = Utils.loadFromLocal('ari_users') || {};
+        this.session = Utils.loadFromLocal('ari_session');
+        this.deviceId = Utils.loadFromLocal('ari_device_id') || Utils.generateId();
+        Utils.saveToLocal('ari_device_id', this.deviceId);
+        
+        this.onLogin = null;
+        this.on2FARequired = null;
+    }
+    
+    async register(pin) {
+        const hash = await Utils.hash256(pin);
+        if (this.users[hash]) throw new Error('PIN déjà utilisé');
+        this.users[hash] { created: Date.now() };
+        Utils.saveToLocal('ari_users', this.users);
+    }
+    
+    async login(pin) {
+        const hash = await Utils.hash256(pin);
+        if (!this.users[hash]) throw new Error('PIN incorrect');
+        const userKey = hash;
+        
+        // Check trusted device
+        const trusted = Utils.loadFromLocal('ari_trusted_devices') || {};
+        if (trusted[this.deviceId]) {
+            this.session = { userKey, deviceId: this.deviceId };
+            Utils.saveToLocal('ari_session', this.session);
+            return true;
+        }
+        
+        // Check if network connection (not loopback)
+        const isNetwork = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+        if (isNetwork) {
+            this.pendingLogin = { userKey };
+            this.on2FARequired && this.on2FARequired();
+            return false; // 2FA required
+        }
+        
+        this.session = { userKey, deviceId: this.deviceId };
+        Utils.saveToLocal('ari_session', this.session);
+        return true;
+    }
+    
+    verify2FA(code) {
+        // Simulated 2FA (in reality would check against secret)
+        const secret = Utils.loadFromLocal('ari_2fa_secret') || '123456';
+        if (code === secret) {
+            const { userKey } = this.pendingLogin;
+            const trusted = Utils.loadFromLocal('ari_trusted_devices') || {};
+            trusted[this.deviceId] = Date.now();
+            Utils.saveToLocal('ari_trusted_devices', trusted);
+            this.session = { userKey, deviceId: this.deviceId };
+            Utils.saveToLocal('ari_session', this.session);
+            this.pendingLogin = null;
+            return true;
+        }
+        return false;
+    }
+    
+    logout() {
+        this.session = null;
+        localStorage.removeItem('ari_session');
+    }
+    
+    isLoggedIn() { return !!this.session; }
+}
+
+// ── WEBSOCKET MANAGER ───────────────────────────────────────────────────────
+class WsManager {
+    constructor(wsUrl) {
+        this.wsUrl = wsUrl;
+        this.ws = null;
+        this.heartbeat = null;
+        this.retryCount = 0;
+        this.maxRetries = 5;
+        this.baseDelay = 1000;
+        this.onMessage = null;
+        this.onStatusChange = null;
+        this.config = {};
+    }
+    
+    connect() {
+        if (this.ws?.readyState === WebSocket.OPEN) return;
+        
+        this.updateStatus('connecting');
+        this.ws = new WebSocket(this.wsUrl);
+        
+        this.ws.onopen = () => {
+            console.log('WebSocket connecté');
+            this.retryCount = 0;
+            this.updateStatus('connected');
+            this.startHeartbeat();
+            // Restore config
+            if (Object.keys(this.config).length) {
+                this.send({ type: 'set_config', config: this.config });
+            }
+        };
+        
+        this.ws.onclose = (e) => {
+            console.log('WebSocket fermé:', e.code, e.reason);
+            this.updateStatus('disconnected');
+            this.stopHeartbeat();
+            this.retry();
+        };
+        
+        this.ws.onerror = (e) => {
+            console.error('WebSocket erreur:', e);
+        };
+        
+        this.ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            this.onMessage && this.onMessage(data);
+        };
+    }
+    
+    retry() {
+        if (this.retryCount >= this.maxRetries) return;
+        const delay = this.baseDelay * Math.pow(2, this.retryCount);
+        setTimeout(() => {
+            this.retryCount++;
+            this.connect();
+        }, delay);
+    }
+    
+    startHeartbeat() {
+        this.stopHeartbeat();
+        this.heartbeat = setInterval(() => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                this.send({ type: 'ping' });
+            }
+        }, 30000);
+    }
+    
+    stopHeartbeat() {
+        if (this.heartbeat) clearInterval(this.heartbeat);
+    }
+    
+    send(data) {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(data));
+        }
+    }
+    
+    updateStatus(status) {
+        this.onStatusChange && this.onStatusChange(status);
+    }
+    
+    close() {
+        this.stopHeartbeat();
+        this.ws?.close();
+    }
+}
+
+// ── AUDIO QUEUE ─────────────────────────────────────────────────────────────
+class AudioQueue {
+    constructor() {
+        this.queue = [];
+        this.ctx = null;
+        this.playing = false;
+        this.muted = false;
+        this.onStart = null;
+        this.onEnd = null;
+    }
+    
+    init() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    enqueue(base64Audio) {
+        this.queue.push(base64Audio);
+        this.playNext();
+    }
+    
+    async playNext() {
+        if (this.playing || this.queue.length === 0 || this.muted) return;
+        
+        this.init();
+        if (this.ctx.state === 'suspended') await this.ctx.resume();
+        
+        this.playing = true;
+        this.onStart && this.onStart();
+        
+        const base64 = this.queue.shift();
+        const audioData = base64.replace(/^data:audio\/(\w+);base64,/, '');
+        const binary = atob(audioData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const audioBuffer = await this.ctx.decodeAudioData(bytes.buffer);
+        
+        const source = this.ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.ctx.destination);
+        
+        source.start();
+        source.onended = () => {
+            this.playing = false;
+            this.onEnd && this.onEnd();
+            this.playNext();
+        };
+    }
+    
+    clear() {
+        this.queue = [];
+        this.playing = false;
+    }
+    
+    setMuted(m) {
+        this.muted = m;
+        if (m && this.ctx) this.ctx.suspend();
+        else if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    }
+}
+
+// ── CHAT MANAGER ────────────────────────────────────────────────────────────
+class ChatManager {
+    constructor() {
+        this.history = [];
+        this.bubbles = [];
+        this.currentStream = null;
+        this.currentToken = '';
+        this.placeholderText = "Bienvenue dans la taverne d'Ari ! Comment puis-je vous aider ?";
+        this.onNewMessage = null;
+    }
+    
+    addUserMessage(text) {
+        this.history.push({ role: 'user', content: text });
+        this.renderBubble('user', text);
+        return text;
+    }
+    
+    startAssistantResponse() {
+        // Remove previous "thinking" bubble if exists
+        this.clearThinkingBubble();
+        
+        // Create new empty bubble
+        const bubble = this.renderBubble('assistant', '', true);
+        this.currentStream = { bubble, content: '' };
+        return bubble;
+    }
+    
+    appendToken(token) {
+        if (!this.currentStream) return;
+        // Filter potential prompt leaks
+        if (token.includes('<think>') || token.includes('</think>')) return;
+        this.currentStream.content += token;
+        this.updateBubble(this.currentStream.bubble, this.currentStream.content);
+    }
+    
+    finishStream() {
+        if (this.currentStream) {
+            this.history.push({ role: 'assistant', content: this.currentStream.content });
+            this.currentStream = null;
+            this.currentToken = '';
+        }
+    }
+    
+    stopGeneration() {
+        if (this.currentStream) {
+            this.history.push({ role: 'assistant', content: this.currentStream.content + ' [arrêté]' });
+            this.currentStream = null;
+        }
+    }
+    
+    renderBubble(role, text, isThinking = false) {
+        const history = document.getElementById('chat-history');
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble bubble-${role}${isThinking ? ' bubble-thinking' : ''}`;
+        bubble.innerHTML = text || (isThinking ? 'Ari réfléchit...' : '');
+        history.appendChild(bubble);
+        history.scrollTop = history.scrollHeight;
+        this.bubbles.push(bubble);
+        return bubble;
+    }
+    
+    updateBubble(bubble, text) {
+        bubble.innerHTML = text;
+        const history = document.getElementById('chat-history');
+        history.scrollTop = history.scrollHeight;
+    }
+    
+    clearThinkingBubble() {
+        const bubbles = document.querySelectorAll('.bubble-thinking');
+        bubbles.forEach(b => b.remove());
+    }
+    
+    clear() {
+        this.history = [];
+        const history = document.getElementById('chat-history');
+        history.innerHTML = '';
+    }
+}
+
+// ── AVATAR MANAGER ──────────────────────────────────────────────────────────
+class AvatarManager {
+    constructor() {
+        this.mode = '3d'; // 3d, 2d, pixel
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.vrm = null;
+        this.pixiApp = null;
+        this.live2dModel = null;
+        this.animationId = null;
+        this.onSpeaking = null;
+        this.isSpeaking = false;
+    }
+    
+    init() {
+        this.setMode(this.mode);
+    }
+    
+    setMode(mode) {
+        this.mode = mode;
+        this.cleanupCurrent();
+        const container = document.getElementById('avatar-container');
+        
+        // Hide all
+        document.getElementById('three-canvas').style.display = 'none';
+        document.getElementById('pixi-canvas').style.display = 'none';
+        document.getElementById('pixel-orbe').style.display = 'none';
+        
+        switch(mode) {
+            case '3d':
+                this.init3D(container);
+                break;
+            case '2d':
+                this.init2D(container);
+                break;
+            case 'pixel':
+                this.initPixel(container);
+                break;
+        }
+        
+        // Update buttons
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+    }
+    
+    init3D(container) {
+        const canvas = document.getElementById('three-canvas');
+        canvas.style.display = 'block';
+        
+        // Scene setup
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.PerspectiveCamera(30, container.clientWidth / container.clientHeight, 0.1, 1000);
+        this.camera.position.set(0, 1.2, 2.5);
+        
+        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        this.renderer.setSize(container.clientWidth, container.clientHeight);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        
+        // Lights
+        const light = new THREE.DirectionalLight(0xffffff, 1.5);
+        light.position.set(1, 2, 2);
+        this.scene.add(light);
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        
+        // Load VRM (simplified - would load from /api/library)
+        this.loadVRM();
+        
+        // Orbit controls
+        const controls = new THREE.OrbitControls(this.camera, canvas);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 1;
+        controls.maxDistance = 5;
+        controls.target.set(0, 1, 0);
+        
+        // Animate
+        this.animate3D();
+    }
+    
+    loadVRM() {
+        // Simplified: create placeholder geometry
+        const geometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+        const material = new THREE.MeshStandardMaterial({ color: 0xffb300 });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(0, 1, 0);
+        this.scene.add(mesh);
+        
+        // Would normally load: new THREE.VRMLoader().load('/api/library/avatar.vrm', vrm => {...})
+    }
+    
+    animate3D() {
+        if (this.mode !== '3d') return;
+        this.animationId = requestAnimationFrame(() => this.animate3D());
+        // Update controls, animations, etc.
+    }
+    
+    init2D(container) {
+        const canvas = document.getElementById('pixi-canvas');
+        canvas.style.display = 'block';
+        
+        this.pixiApp = new PIXI.Application();
+        this.pixiApp.init({ 
+            canvas, 
+            width: container.clientWidth, 
+            height: container.clientHeight,
+            backgroundAlpha: 0,
+            resizeTo: container
+        });
+        
+        // Load Live2D model (placeholder)
+        // Would load: PIXI.live2d.Live2DModel.from('/api/library/model.moc3')
+        this.live2dModel = new PIXI.Graphics();
+        this.live2dModel.x = container.clientWidth / 2;
+        this.live2dModel.y = container.clientHeight / 2;
+        this.pixiApp.stage.addChild(this.live2dModel);
+        
+        // Simple placeholder animation
+        this.animate2D();
+    }
+    
+    animate2D() {
+        if (this.mode !== '2d' || !this.pixiApp) return;
+        this.animationId = requestAnimationFrame(() => this.animate2D());
+        // Update model via interaction manager, etc.
+    }
+    
+    initPixel(container) {
+        const orbe = document.getElementById('pixel-orbe');
+        orbe.style.display = 'block';
+        // CSS animation handles it
+    }
+    
+    cleanupCurrent() {
+        if (this.animationId) cancelAnimationFrame(this.animationId);
+        if (this.renderer) this.renderer.dispose();
+        if (this.pixiApp) this.pixiApp.destroy(true);
+    }
+    
+    setSpeaking(speaking) {
+        if (this.isSpeaking === speaking) return;
+        this.isSpeaking = speaking;
+        this.onSpeaking && this.onSpeaking(speaking);
+        
+        // Visual feedback based on mode
+        if (speaking) {
+            // Glow effect
+            const canvas = document.getElementById('three-canvas');
+            if (canvas) canvas.style.filter = 'drop-shadow(0 0 20px #ffb300)';
+        } else {
+            const canvas = document.getElementById('three-canvas');
+            if (canvas) canvas.style.filter = 'none';
+        }
+    }
+}
+
+// ── VOICE INPUT ─────────────────────────────────────────────────────────────
+class VoiceInput {
+    constructor() {
+        this.recognition = null;
+        this.isListening = false;
+        this.onResult = null;
+        this.onError = null;
+        this.lang = 'fr-FR';
+        
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            this.recognition = new SpeechRecognition();
+            this.recognition.lang = this.lang;
+            this.recognition.continuous = false;
+            this.recognition.interimResults = false;
+            
+            this.recognition.onresult = (e) => {
+                const transcript = e.results[0][0].transcript;
+                this.stop();
+                this.onResult && this.onResult(transcript);
+            };
+            
+            this.recognition.onerror = (e) => {
+                console.error('Speech error:', e);
+                this.stop();
+                this.onError && this.onError(e);
+            };
+            
+            this.recognition.onend = () => {
+                if (this.isListening) {
+                    // Restart if still supposed to be listening
+                    try { this.start(); } catch (e) {}
+                } else {
+                    this.updateUI(false);
+                }
+            };
+        }
+    }
+    
+    start() {
+        if (!this.recognition) {
+            alert('Reconnaissance vocale non supportée par ce navigateur');
+            return;
+        }
+        try {
+            this.recognition.start();
+            this.isListening = true;
+            this.updateUI(true);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+    
+    stop() {
+        if (this.recognition && this.isListening) {
+            this.recognition.stop();
+            this.isListening = false;
+            this.updateUI(false);
+        }
+    }
+    
+    updateUI(listening) {
+        const btn = document.getElementById('voice-btn');
+        btn.classList.toggle('listening', listening);
+        btn.innerHTML = listening ? '⏹️' : '🎤';
+    }
+}
+
+// ── USAGE DOCK ──────────────────────────────────────────────────────────────
+class UsageDock {
+    constructor() {
+        this.tokensIn = 0;
+        this.tokensOut = 0;
+        this.costInCents = 0;
+        this.costOutCents = 0;
+        this.sparkValues = [];
+        this.maxSparkPoints = 20;
+        this.canvas = document.getElementById('usage-sparkline');
+        this.collapsed = false;
+    }
+    
+    updateStats() {
+        document.getElementById('tokens-in').textContent = this.tokensIn;
+        document.getElementById('tokens-out').textContent = this.tokensOut;
+        document.getElementById('cost-in').textContent = Utils.formatCost(this.costInCents);
+        document.getElementById('cost-out').textContent = Utils.formatCost(this.costOutCents);
+        document.getElementById('total-cost').textContent = Utils.formatCost(this.costInCents + this.costOutCents);
+        
+        // Update sparkline
+        this.sparkValues.push(this.tokensOut);
+        if (this.sparkValues.length > this.maxSparkPoints) this.sparkValues.shift();
+        Utils.drawSparkline(this.canvas, this.sparkValues);
+    }
+    
+    addUsage(type, tokens, costPerTokenCents = 1) {
+        const cost = Math.round(tokens * costPerTokenCents);
+        if (type === 'in') {
+            this.tokensIn += tokens;
+            this.costInCents += cost;
+        } else {
+            this.tokensOut += tokens;
+            this.costOutCents += cost;
+        }
+        this.updateStats();
+    }
+    
+    reset() {
+        this.tokensIn = 0;
+        this.tokensOut = 0;
+        this.costInCents = 0;
+        this.costOutCents = 0;
+        this.sparkValues = [];
+        this.updateStats();
+    }
+}
+
+// ── SETTINGS PANEL ──────────────────────────────────────────────────────────
+class SettingsPanel {
+    constructor() {
+        this.panel = document.getElementById('settings-panel');
+        this.isOpen = false;
+        this.currentSettings = {
+            model: 'gpt-4',
+            voice: 'female-fr',
+            avatarMode: '3d',
+            systemPrompt: '',
+            muted: false,
+            darkMode: true
+        };
+    }
+    
+    bindEvents(onSave) {
+        document.getElementById('settings-btn').onclick = () => this.toggle();
+        document.getElementById('save-settings-btn').onclick = () => {
+            this.collect();
+            onSave && onSave(this.currentSettings);
+            this.close();
+        };
+    }
+    
+    toggle() {
+        this.isOpen ? this.close() : this.open();
+    }
+    
+    open() {
+        this.panel.classList.add('open');
+        this.isOpen = true;
+    }
+    
+    close() {
+        this.panel.classList.remove('open');
+        this.isOpen = false;
+    }
+    
+    collect() {
+        this.currentSettings.model = document.getElementById('model-select').value;
+        this.currentSettings.voice = document.getElementById('voice-select').value;
+        this.currentSettings.avatarMode = document.getElementById('avatar-mode-select').value;
+        this.currentSettings.systemPrompt = document.getElementById('system-prompt').value;
+        this.currentSettings.muted = document.getElementById('mute-switch').checked;
+        this.currentSettings.darkMode = document.getElementById('darkmode-switch').checked;
+    }
+    
+    apply(settings) {
+        Object.assign(this.currentSettings, settings);
+        document.getElementById('model-select').value = settings.model;
+        document.getElementById('voice-select').value = settings.voice;
+        document.getElementById('avatar-mode-select').value = settings.avatarMode;
+        document.getElementById('system-prompt').value = settings.systemPrompt;
+        document.getElementById('mute-switch').checked = settings.muted;
+        document.getElementById('darkmode-switch').checked = settings.darkMode;
+    }
+}
+
+// ── MAIN APPLICATION ───────────────────────────────────────────────────────
+class AriApp {
+    constructor() {
+        // Configuration
+        this.wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+        this.PIN_HASH = null;
+        
+        // Managers
+        this.auth = new AuthManager();
+        this.ws = new WsManager(this.wsUrl);
+        this.audio = new AudioQueue();
+        this.chat = new ChatManager();
+        this.avatar = new AvatarManager();
+        this.voice = new VoiceInput();
+        this.usage = new UsageDock();
+        this.settings = new SettingsPanel();
+        
+        // State
+        this.isGenerating = false;
+        this.abortController = null;
+        
+        this.init();
+    }
+    
+    init() {
+        this.bindAuth();
+        this.bindChat();
+        this.bindVoice();
+        this.bindSettings();
+        this.bindUsageDock();
+        this.bindAvatarControls();
+        this.setupWebSocket();
+        
+        // Check session
+        if (this.auth.isLoggedIn()) {
+            this.showApp();
+        } else {
+            document.getElementById('auth-container').style.display = 'flex';
+        }
+    }
+    
+    bindAuth() {
+        const pinInput = document.getElementById('pin-input');
+        const loginBtn = document.getElementById('login-btn');
+        const registerBtn = document.getElementById('register-btn');
+        const errorDiv = document.getElementById('auth-error');
+        
+        // PIN input: only numbers
+        pinInput.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+        });
+        
+        // Login with Enter
+        pinInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.doLogin();
+        });
+        
+        loginBtn.onclick = () => this.doLogin();
+        registerBtn.onclick = () => this.doRegister();
+        
+        // 2FA handlers
+        document.getElementById('2fa-verify-btn').onclick = () => this.do2FAVerify();
+        document.getElementById('2fa-cancel-btn').onclick = () => {
+            document.getElementById('2fa-container').style.display = 'none';
+        };
+        
+        // 2FA input
+        document.getElementById('2fa-input').addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+        });
+        document.getElementById('2fa-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.do2FAVerify();
+        });
+    }
+    
+    async doLogin() {
+        const pin = document.getElementById('pin-input').value;
+        if (pin.length < 4) {
+            this.setAuthError('Code PIN trop court');
+            return;
+        }
+        
+        try {
+            const success = await this.auth.login(pin);
+            if (success) {
+                this.showApp();
+            } else {
+                // 2FA required
+                document.getElementById('auth-container').style.display = 'none';
+                document.getElementById('2fa-container').style.display = 'flex';
+                document.getElementById('2fa-error').textContent = '';
+            }
+        } catch (e) {
+            this.setAuthError(e.message);
+        }
+    }
+    
+    async doRegister() {
+        const pin = document.getElementById('pin-input').value;
+        if (pin.length < 4) {
+            this.setAuthError('Code PIN trop court (min 4 chiffres)');
+            return;
+        }
+        try {
+            await this.auth.register(pin);
+            this.setAuthError('Compte créé ! Connectez-vous.', false);
+        } catch (e) {
+            this.setAuthError(e.message);
+        }
+    }
+    
+    async do2FAVerify() {
+        const code = document.getElementById('2fa-input').value;
+        if (code.length !== 6) {
+            document.getElementById('2fa-error').textContent = 'Code à 6 chiffres requis';
+            return;
+        }
+        const success = this.auth.verify2FA(code);
+        if (success) {
+            document.getElementById('2fa-container').style.display = 'none';
+            this.showApp();
+        } else {
+            document.getElementById('2fa-error').textContent = 'Code incorrect';
+        }
+    }
+    
+    setAuthError(msg, isError = true) {
+        const el = document.getElementById('auth-error');
+        el.textContent = msg;
+        el.style.color = isError ? '#ff5252' : '#4caf50';
+    }
+    
+    showApp() {
+        document.getElementById('auth-container').style.display = 'none';
+        document.getElementById('app-container').style.display = 'flex';
+        this.ws.connect();
+        this.avatar.init();
+        
+        // Load saved settings
+        const saved = Utils.loadFromLocal('ari_settings');
+        if (saved) {
+            this.settings.apply(saved);
+            this.avatar.setMode(saved.avatarMode);
+            this.audio.setMuted(saved.muted);
+        }
+    }
+    
+    bindChat() {
+        const input = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        
+        const sendMessage = () => {
+            const text = input.value.trim();
+            if (!text || this.isGenerating) return;
+            
+            this.chat.addUserMessage(text);
+            input.value = '';
+            this.sendToLLM(text);
+        };
+        
+        sendBtn.onclick = sendMessage;
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+    
+    bindVoice() {
+        this.voice.onResult = (text) => {
+            document.getElementById('message-input').value = text;
+            // Auto send? Optional
+        };
+        
+        document.getElementById('voice-btn').onclick = () => {
+            if (this.voice.isListening) {
+                this.voice.stop();
+            } else {
+                this.voice.start();
+            }
+        };
+    }
+    
+    bindSettings() {
+        this.settings.bindEvents((settings) => {
+            Utils.saveToLocal('ari_settings', settings);
+            this.avatar.setMode(settings.avatarMode);
+            this.audio.setMuted(settings.muted);
+        });
+        
+        document.getElementById('logout-btn').onclick = () => {
+            this.ws.close();
+            this.auth.logout();
+            location.reload();
+        };
+    }
+    
+    bindUsageDock() {
+        const dock = document.getElementById('usage-dock');
+        const toggle = document.getElementById('dock-toggle');
+        let collapsed = false;
+        
+        toggle.onclick = () => {
+            collapsed = !collapsed;
+            dock.classList.toggle('collapsed', collapsed);
+            toggle.textContent = collapsed ? '▶' : '◀';
+        };
+    }
+    
+    bindAvatarControls() {
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.onclick = () => {
+                const mode = btn.dataset.mode;
+                this.avatar.setMode(mode);
+                const settings = this.settings.currentSettings;
+                settings.avatarMode = mode;
+                Utils.saveToLocal('ari_settings', settings);
+            };
+        });
+    }
+    
+    setupWebSocket() {
+        this.ws.onStatusChange = (status) => {
+            const dot = document.getElementById('ws-status-dot');
+            const text = document.getElementById('ws-status-text');
+            dot.className = 'status-dot ' + status;
+            text.textContent = status === 'connected' ? 'Connecté' : 
+                               status === 'connecting' ? 'Connexion...' : 'Déconnecté';
+        };
+        
+        this.ws.onMessage = (msg) => {
+            this.handleWsMessage(msg);
+        };
+    }
+    
+    async sendToLLM(userMsg) {
+        if (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN) {
+            alert('Pas de connexion serveur');
+            return;
+        }
+        
+        this.isGenerating = true;
+        document.getElementById('send-btn').disabled = true;
+        
+        // Create thinking bubble
+        const bubble = this.chat.startAssistantResponse();
+        this.chat.currentStream.bubble.classList.add('bubble-thinking');
+        
+        // Send request
+        const settings = this.settings.currentSettings;
+        const payload = {
+            type: 'chat',
+            message: userMsg,
+            model: settings.model,
+            system_prompt: settings.systemPrompt,
+            stream: true
+        };
+        
+        this.ws.send(payload);
+        
+        // Track usage
+        this.usage.addUsage('in', this.estimateTokens(userMsg), 1); // 1 cent/token for input
+    }
+    
+    handleWsMessage(msg) {
+        switch (msg.type) {
+            case 'chat_chunk':
+                this.chat.appendToken(msg.token);
+                break;
+                
+            case 'chat_done':
+                this.chat.finishStream();
+                this.isGenerating = false;
+                document.getElementById('send-btn').disabled = false;
+                
+                // Track output usage
+                const fullResponse = this.chat.history[this.chat.history.length-1].content;
+                this.usage.addUsage('out', this.estimateTokens(fullResponse), 2); // 2 cent/token for output
+                break;
+                
+            case 'audio_chunk':
+                if (!msg.audio) return;
+                // Accumulate audio chunks
+                if (!this.audioBuffer) this.audioBuffer = '';
+                this.audioBuffer += msg.audio;
+                break;
+                
+            case 'audio_done':
+                if (this.audioBuffer) {
+                    this.audio.enqueue(this.audioBuffer);
+                    this.audioBuffer = '';
+                }
+                break;
+                
+            case 'error':
+                alert('Erreur: ' + msg.message);
+                this.chat.finishStream();
+                this.isGenerating = false;
+                document.getElementById('send-btn').disabled = false;
+                break;
+        }
+    }
+    
+    estimateTokens(text) {
+        // Rough approximation: 1 token ≈ 4 chars
+        return Math.ceil(text.length / 4);
+    }
+}
+
+// ── BOOTSTRAP ───────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+    // Expose app globally for debugging
+    window.ariApp = new AriApp();
+});
+</script>
+
+</body>
+</html>

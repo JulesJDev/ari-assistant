@@ -1,0 +1,93 @@
+# ============================================
+# Ari - Assistant Vocal IA Local
+# Docker Compose Configuration
+# ============================================
+# Démarrage : docker-compose up -d
+# Arrêt    : docker-compose down
+# Logs     : docker-compose logs -f
+# ============================================
+
+version: '3.8'
+
+services:
+  # Serviceprincipal : API FastAPI
+  ari-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ari-assistant
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      # Montage des profils mémoire (persistance)
+      - ./memory_profiles:/app/memory_profiles
+      # Montage des logs (persistance)
+      - ./logs:/app/logs
+      # Montage données (SQLite, etc.)
+      - ./data:/app/data
+      # Montage modèles (optionnel - si stockés localement)
+      - ./models:/app/models:ro
+      # Fichier d'environnement
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    environment:
+      # S'assurer que les chemins montés sont utilisés
+      - MEMORY_PROFILES_DIR=/app/memory_profiles
+      - LOG_FILE=/app/logs/ari.log
+      - DATABASE_PATH=/app/data/ari.db
+    networks:
+      - ari-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Limites ressources (optionnel)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 4G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Service Ollama (si on veut tout dans Docker)
+  # Décommenter pour exécuter Ollama dans un conteneur séparé
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ari-ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ./ollama:/root/.ollama
+  #   networks:
+  #     - ari-network
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+networks:
+  ari-network:
+    driver: bridge
+
+# Volumes nommés (alternative aux bind mounts)
+# volumes:
+#   ari-memory:
+#   ari-logs:
+#   ari-data:
